@@ -1,8 +1,41 @@
 # Swoop
 
 Zero-config file transfer for the local network. Devices running Swoop discover
-each other automatically and exchange files directly (no cloud, no setup),
-across Windows, macOS and Linux — with mobile planned.
+each other automatically and exchange files directly — no cloud, no SMB/FTP
+setup. **Desktop:** Windows, macOS, Linux. **Mobile:** phones and tablets via
+the **mobile browser** (no app install); native iOS/Android apps remain on the
+roadmap.
+
+> **Quick start (Russian):** [docs/USAGE.md](docs/USAGE.md)
+
+## How to use
+
+### Desktop ↔ desktop
+
+1. Launch Swoop and pick a network interface (Wi‑Fi / Ethernet).
+2. Click a device tile in the grid.
+3. Drag files into the drop zone (or use the file/folder picker), then **Send**.
+4. The receiver accepts or declines in the incoming-offer dialog. Files land in
+   the OS **Downloads** folder.
+5. Optional: expand **Messages** under the drop zone for short text/links.
+
+### Phone / tablet (browser)
+
+The desktop serves a minimal web UI at `https://<desktop-ip>:53317/`. Pairing
+is **1:1** (QR on the self-card, or open the URL manually). Phone and PC must
+share the same LAN.
+
+| Direction | What you do |
+|-----------|-------------|
+| **Phone → PC** | On the phone page: pick files → Send. Confirm on the desktop. |
+| **PC → phone** | On the desktop: select the browser peer → Send. On the phone: **Accept and download** (multi-file/folder → one `.zip`). |
+| **Chat** | «Сообщения» on the phone page; **Messages** on the desktop when the web peer is selected. |
+
+First visit: accept the self-signed TLS warning and compare the short
+fingerprint shown on both sides (TOFU).
+
+More detail: [docs/MOBILE-WEB.md](docs/MOBILE-WEB.md) · user guide (RU):
+[docs/USAGE.md](docs/USAGE.md)
 
 ## Architecture (short)
 
@@ -13,11 +46,12 @@ and the UI is just one client of it.
 - `core/identity` — device id + self-signed TLS cert + fingerprint (TOFU trust)
 - `core/discovery` — peer discovery via UDP multicast on all interfaces
 - `core/transport` — control plane (HTTPS `/api/v1/...`: info, handshake)
-- `core/transfer` — data plane (parallel TCP streams, built for throughput)
+- `core/transfer` — data plane (parallel TCP streams; HTTP upload/pull for web)
+- `core/webui` — embedded mobile browser page
 - `app.go` / `frontend/` — Wails desktop UI
 
-Control plane (HTTPS) and data plane (raw parallel TCP) are deliberately
-separate so file bytes can saturate the link without HTTP overhead.
+Control plane (HTTPS) and data plane (raw parallel TCP, or HTTP for browsers)
+are deliberately separate so native transfers can saturate the link.
 
 ## Prerequisites
 
@@ -74,7 +108,7 @@ make doctor      # wails doctor
 
 ## Troubleshooting
 
-**esbuild "installed for another platform"** - this happens when the whole
+**esbuild "installed for another platform"** — this happens when the whole
 project (including `frontend/node_modules`) is copied between Windows and Linux/
 macOS, because esbuild ships a platform-specific native binary. The build
 scripts detect a foreign `node_modules` and reinstall it automatically. To fix
@@ -87,3 +121,9 @@ rm -rf frontend/node_modules && bash scripts/build.sh
 > Tip: testing discovery needs **two** machines (or VMs) on the same LAN. Two
 > instances on one host won't see each other — they share a device identity and
 > the control port.
+
+**Transfers fail with EOF** — pick the LAN interface explicitly at startup
+(Wi‑Fi vs Ethernet vs a VM adapter).
+
+**Phone cannot connect** — same Wi‑Fi, accept the HTTPS certificate warning,
+allow port **53317** through the desktop firewall.

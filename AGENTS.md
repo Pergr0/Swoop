@@ -7,8 +7,9 @@ first. Keep it accurate (see "Maintenance rule" at the end).
 
 Swoop is a zero-config file-transfer app for the local network. Devices running
 Swoop discover each other automatically and exchange files directly - no cloud,
-no manual SMB/FTP/share setup. The first target is desktop (Windows, macOS,
-Linux); mobile (iOS/Android) is planned.
+no manual SMB/FTP/share setup. Desktop: Windows, macOS, Linux. Mobile today:
+phones/tablets via the embedded HTTPS web UI (browser, no app install). Native
+iOS/Android apps remain on the roadmap. User guide: `docs/USAGE.md`.
 
 Core idea: do not invent an OS-level protocol and do not auto-configure the OS.
 Instead ship a small cross-platform agent that speaks one open protocol over
