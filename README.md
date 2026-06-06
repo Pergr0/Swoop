@@ -1,10 +1,6 @@
 # Swoop
 
-Zero-config file transfer for the local network. Devices running Swoop discover
-each other automatically and exchange files directly — no cloud, no SMB/FTP
-setup. **Desktop:** Windows, macOS, Linux. **Mobile:** phones and tablets via
-the **mobile browser** (no app install); native iOS/Android apps remain on the
-roadmap.
+Zero-config LAN file transfer (Windows, macOS, Linux). Phones and tablets work via mobile browser — no cloud, no setup.
 
 > **Quick start (Russian):** [docs/USAGE.md](docs/USAGE.md)
 
