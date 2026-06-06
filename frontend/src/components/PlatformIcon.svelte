@@ -5,6 +5,7 @@
   import androidIcon from "../assets/os/android.svg";
   import iosIcon from "../assets/os/ios.svg";
   import desktopIcon from "../assets/os/desktop.svg";
+  import webIcon from "../assets/os/web.svg";
 
   export let platform = "";
   export let size = 40;
@@ -15,6 +16,7 @@
     linux: linuxIcon,
     android: androidIcon,
     ios: iosIcon,
+    web: webIcon,
   };
   const labels: Record<string, string> = {
     windows: "Windows",
@@ -22,6 +24,7 @@
     linux: "Linux",
     android: "Android",
     ios: "iOS",
+    web: "Браузер",
   };
   $: src = icons[platform] ?? desktopIcon;
   $: label = labels[platform] ?? "Устройство";

@@ -20,6 +20,14 @@ const (
 	// on purpose: the chat is for links/short notes, and a cap bounds spam/abuse.
 	MaxMessageBytes = 8192
 
+	// MaxPrepareUploadBodyBytes caps the JSON body of POST /api/v1/prepare-upload.
+	MaxPrepareUploadBodyBytes = 4 << 20 // 4 MiB
+
+	// Transfer limits for incoming offers (claimed sizes; enforced before accept).
+	MaxTransferFiles       = 4096
+	MaxTransferFileBytes   = 4 << 30  // 4 GiB per file
+	MaxTransferTotalBytes  = 32 << 30 // 32 GiB per session
+
 	// DiscoveryMulticastGroup / DiscoveryPort define the dependency-free UDP
 	// multicast fallback used for discovery before mDNS is layered on top.
 	DiscoveryMulticastGroup = "239.42.13.37"
@@ -35,6 +43,21 @@ const (
 	PlatformLinux   Platform = "linux"
 	PlatformAndroid Platform = "android"
 	PlatformIOS     Platform = "ios"
+	PlatformWeb     Platform = "web"
+)
+
+// Transfer modes select the data plane after prepare-upload accepts.
+const (
+	TransferTCPPush    = "tcp-push"
+	TransferHTTPUpload = "http-upload"
+	TransferHTTPPull   = "http-pull" // phase 2
+)
+
+// Capability strings advertised in DeviceInfo.Capabilities.
+const (
+	CapTCPPush    = "tcp-push"
+	CapHTTPUpload = "http-upload"
+	CapHTTPPull   = "http-pull" // phase 2
 )
 
 // DeviceInfo describes a peer on the local network. It is advertised over
@@ -52,6 +75,21 @@ type DeviceInfo struct {
 	ControlPort int      `json:"controlPort"`
 	Fingerprint string   `json:"fingerprint"`
 	Version     int      `json:"version"`
+	// Capabilities lists supported data-plane modes (e.g. tcp-push, http-upload).
+	Capabilities []string `json:"capabilities,omitempty"`
+	// Browser is set for platform web clients (parsed from User-Agent).
+	Browser string `json:"browser,omitempty"`
+}
+
+// PresenceRequest is sent by a browser client to appear in the desktop grid.
+type PresenceRequest struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// PresenceResponse is returned after a successful presence heartbeat.
+type PresenceResponse struct {
+	Token string `json:"token"`
 }
 
 // FileMeta describes a single file queued for transfer.
@@ -77,12 +115,44 @@ type PrepareUploadRequest struct {
 	Files  []FileMeta `json:"files"`
 }
 
-// PrepareUploadResponse is returned when a receiver accepts an upload. The
-// token authorises the sender on the data plane, which it reaches on DataPort.
+// PrepareUploadResponse is returned when a receiver accepts an upload. Mode
+// selects the data plane: tcp-push uses DataPort; http-upload uses UploadPath.
 type PrepareUploadResponse struct {
-	SessionID string `json:"sessionId"`
-	DataPort  int    `json:"dataPort"`
-	Token     string `json:"token"`
+	SessionID  string `json:"sessionId"`
+	Mode       string `json:"mode"`
+	DataPort   int    `json:"dataPort,omitempty"`
+	UploadPath string `json:"uploadPath,omitempty"`
+	Token      string `json:"token"`
+}
+
+// PullOffer is shown to a browser client when the desktop has staged a send.
+type PullOffer struct {
+	SessionID string     `json:"sessionId"`
+	Sender    DeviceInfo `json:"sender"`
+	Files     []FileMeta `json:"files"`
+	TotalSize int64      `json:"totalSize"`
+	Count     int      `json:"count"`
+}
+
+// DownloadFile describes one HTTP pull target after the browser accepts.
+type DownloadFile struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	RelPath      string `json:"relPath,omitempty"`
+	Size         int64  `json:"size"`
+	DownloadPath string `json:"downloadPath"`
+}
+
+// PullAcceptResponse is returned when a browser accepts a desktop pull offer.
+type PullAcceptResponse struct {
+	SessionID string         `json:"sessionId"`
+	Mode      string         `json:"mode"`
+	Token     string         `json:"token"`
+	Files     []DownloadFile `json:"files,omitempty"`
+	// ArchivePath is set for multi-file / directory sends (single .zip download).
+	ArchivePath string `json:"archivePath,omitempty"`
+	ArchiveName string `json:"archiveName,omitempty"`
+	ArchiveSize int64  `json:"archiveSize,omitempty"`
 }
 
 // ChatMessage is a short text message (e.g. a link or note) sent over the
@@ -101,4 +171,11 @@ type ChatMessage struct {
 type ReadReceipt struct {
 	Reader DeviceInfo `json:"reader"`
 	UpToTs int64      `json:"upToTs"`
+}
+
+// WebChatPollResponse is returned when a browser polls for desktop→browser chat.
+type WebChatPollResponse struct {
+	Messages []ChatMessage `json:"messages"`
+	// ReadUpTo is the newest incoming message ts the desktop has read (read receipt).
+	ReadUpTo int64 `json:"readUpTo"`
 }

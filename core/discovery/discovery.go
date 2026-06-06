@@ -29,6 +29,7 @@ type Discoverer struct {
 
 	mu    sync.RWMutex
 	peers map[string]peerEntry
+	order []string // first-seen peer IDs; stable grid order for the session
 
 	onChange func([]protocol.DeviceInfo)
 
@@ -144,7 +145,7 @@ func (d *Discoverer) readLoop(ctx context.Context, pconn *ipv4.PacketConn) {
 		if err := json.Unmarshal(buf[:n], &info); err != nil {
 			continue
 		}
-		if info.ID == "" || info.ID == d.self.ID {
+		if info.ID == "" || info.ID == d.self.ID || info.Fingerprint == "" {
 			continue
 		}
 		// Prefer the address the peer advertises (it reflects the interface it
@@ -165,6 +166,9 @@ func (d *Discoverer) upsert(info protocol.DeviceInfo) {
 	d.mu.Lock()
 	_, existed := d.peers[info.ID]
 	d.peers[info.ID] = peerEntry{info: info, lastSeen: time.Now()}
+	if !existed {
+		d.order = append(d.order, info.ID)
+	}
 	d.mu.Unlock()
 	if !existed {
 		d.emit()
@@ -179,12 +183,14 @@ func (d *Discoverer) reapLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			cutoff := time.Now().Add(-3 * d.interval)
+			// Drop peers we have not heard from for several announce intervals.
+			cutoff := time.Now().Add(-4 * d.interval)
 			changed := false
 			d.mu.Lock()
 			for id, e := range d.peers {
 				if e.lastSeen.Before(cutoff) {
 					delete(d.peers, id)
+					d.order = removeID(d.order, id)
 					changed = true
 				}
 			}
@@ -196,15 +202,26 @@ func (d *Discoverer) reapLoop(ctx context.Context) {
 	}
 }
 
-// Peers returns a snapshot of currently known peers.
+// Peers returns a snapshot of currently known peers in stable first-seen order.
 func (d *Discoverer) Peers() []protocol.DeviceInfo {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	out := make([]protocol.DeviceInfo, 0, len(d.peers))
-	for _, e := range d.peers {
-		out = append(out, e.info)
+	out := make([]protocol.DeviceInfo, 0, len(d.order))
+	for _, id := range d.order {
+		if e, ok := d.peers[id]; ok {
+			out = append(out, e.info)
+		}
 	}
 	return out
+}
+
+func removeID(order []string, id string) []string {
+	for i, x := range order {
+		if x == id {
+			return append(order[:i], order[i+1:]...)
+		}
+	}
+	return order
 }
 
 func (d *Discoverer) emit() {

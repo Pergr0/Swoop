@@ -29,9 +29,7 @@ func TestLoopbackTransfer(t *testing.T) {
 
 	var recvSelf protocol.DeviceInfo
 	mgrR := NewManager(func() protocol.DeviceInfo { return recvSelf }, dlDir)
-	stop := make(chan struct{})
-	defer close(stop)
-	if err := mgrR.StartDataPlane(stop); err != nil {
+	if err := mgrR.StartDataPlane(ctx); err != nil {
 		t.Fatalf("data plane: %v", err)
 	}
 	mgrR.SetOnOffer(func(Offer) { go mgrR.RespondIncoming(true) })

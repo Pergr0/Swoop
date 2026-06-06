@@ -19,12 +19,12 @@ type captureHandler struct {
 	lastRead protocol.ReadReceipt
 }
 
-func (c *captureHandler) ReceiveMessage(m protocol.ChatMessage, _ string) int {
+func (c *captureHandler) ReceiveMessage(m protocol.ChatMessage, _, _ string) int {
 	c.last = m
 	return http.StatusOK
 }
 
-func (c *captureHandler) ReceiveRead(rr protocol.ReadReceipt, _ string) int {
+func (c *captureHandler) ReceiveRead(rr protocol.ReadReceipt, _, _ string) int {
 	c.lastRead = rr
 	return http.StatusOK
 }

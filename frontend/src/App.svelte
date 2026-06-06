@@ -25,10 +25,12 @@
   import NetIcon from "./components/NetIcon.svelte";
   import TransferPanel from "./components/TransferPanel.svelte";
   import ChevronIcon from "./components/ChevronIcon.svelte";
+  import QrModal from "./components/QrModal.svelte";
 
   interface DeviceInfo {
     id: string; name: string; host: string; address: string;
     platform: string; controlPort: number; fingerprint: string; version: number;
+    browser?: string;
   }
   interface NetInterface {
     name: string; addresses: string[]; kind: string; up: boolean; speedMbps: number;
@@ -88,6 +90,7 @@
   let unread: Record<string, number> = {};
   let copyFeedback = "";
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  let showQr = false;
 
   const IFACE_KEY = "swoop-iface";
 
@@ -98,6 +101,19 @@
   function peerEndpoint(p: DeviceInfo): string {
     const addr = p.address || p.host;
     return p.controlPort > 0 ? `${addr}:${p.controlPort}` : addr;
+  }
+  function peerSubtitle(p: DeviceInfo): string {
+    const ep = peerEndpoint(p);
+    if (p.platform === "web" && p.browser) return `${ep} · ${p.browser}`;
+    return ep;
+  }
+  function isWebPeer(p: DeviceInfo): boolean {
+    return p.platform === "web";
+  }
+  function webUploadURL(s: DeviceInfo): string {
+    const addr = s.address || s.host;
+    if (!addr || !s.controlPort) return "";
+    return `https://${addr}:${s.controlPort}/`;
   }
   function fmtSpeedMbps(mbps: number): string {
     if (!mbps || mbps <= 0) return "";
@@ -251,7 +267,8 @@
   }
   function onKeydown(e: KeyboardEvent) {
     if (e.key === "Escape") {
-      if (incoming && recvState?.state !== "transferring") dismissIncoming();
+      if (showQr) showQr = false;
+      else if (incoming && recvState?.state !== "transferring") dismissIncoming();
       else if (view === "device") back();
     }
   }
@@ -412,16 +429,39 @@
         {/if}
       </div>
     </div>
-    {#if self}
-      <div class="self-card">
-        <PlatformIcon platform={self.platform} size={40} />
-        <div class="self-meta">
-          <div class="self-name">{self.name}</div>
-          <div class="self-sub">это устройство · {self.address || self.host}:{self.controlPort}</div>
+    <div class="header-end">
+      {#if self}
+        <div class="header-self">
+          {#if started && webUploadURL(self)}
+            <button
+              type="button"
+              class="btn-qr"
+              title="QR для отправки с телефона"
+              aria-label="Показать QR-код"
+              on:click={() => (showQr = true)}
+            >
+              <svg class="btn-qr-icon" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+                <path fill="currentColor" d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm13-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm2 2h2v2h-2v-2zm-2 2h2v2h-2v-2zm2 2h2v2h-2v-2zM13 17h2v2h-2v-2zm2-4h2v2h-2v-2z"/>
+              </svg>
+            </button>
+          {/if}
+          <div class="self-card">
+            <PlatformIcon platform={self.platform} size={40} />
+            <div class="self-meta">
+              <div class="self-name">{self.name}</div>
+              <div class="self-sub">это устройство · {peerEndpoint(self)}</div>
+            </div>
+          </div>
         </div>
-      </div>
-    {/if}
+      {/if}
+    </div>
   </header>
+
+  <QrModal
+    open={showQr}
+    url={self ? webUploadURL(self) : ""}
+    onClose={() => (showQr = false)}
+  />
 
   {#if sending && view === "grid"}
     <div class="transfer-float">
@@ -453,14 +493,18 @@
       {:else}
         <div class="grid">
           {#each peers as p (p.id)}
-            <button class="device" title="{p.name} · {p.fingerprint}" on:click={() => selectDevice(p)}>
-              {#if unread[p.id]}<span class="badge">{unread[p.id]}</span>{/if}
+            <button
+              class="device"
+              title="{isWebPeer(p) ? `${p.name} · ${p.browser || 'Браузер'}` : `${p.name} · ${p.fingerprint}`}"
+              on:click={() => selectDevice(p)}
+            >
+              {#if unread[p.id] && !isWebPeer(p)}<span class="badge">{unread[p.id]}</span>{/if}
               <PlatformIcon platform={p.platform} size={48} />
               <div class="device-name">
                 <span class="device-online" title="В сети" aria-hidden="true"></span>
                 <span>{p.name}</span>
               </div>
-              <div class="device-host">{peerEndpoint(p)}</div>
+              <div class="device-host">{peerSubtitle(p)}</div>
             </button>
           {/each}
         </div>
@@ -477,7 +521,13 @@
           <PlatformIcon platform={selected.platform} size={36} />
           <div>
             <div class="device-top-name">{selected.name}</div>
-            <div class="device-top-sub">отпечаток {shortFp(selected.fingerprint)}</div>
+            <div class="device-top-sub">
+              {#if isWebPeer(selected)}
+                {selected.browser || "Браузер"} · {peerEndpoint(selected)}
+              {:else}
+                отпечаток {shortFp(selected.fingerprint)}
+              {/if}
+            </div>
           </div>
         </div>
       </div>
@@ -724,7 +774,7 @@
           <PlatformIcon platform={incoming.sender.platform} size={56} />
         </div>
         <h3>{incoming.sender.name} хочет отправить файлы</h3>
-        <p class="modal-sub">{incoming.sender.host}</p>
+        <p class="modal-sub">{peerEndpoint(incoming.sender)}</p>
         <p class="modal-info">
           {incoming.count} файл(ов) · {fmtBytes(incoming.totalSize)}
           {#if incoming.looseFiles > 0} · {incoming.looseFiles} без папки{/if}
@@ -818,6 +868,39 @@
   .brand-text { min-width: 0; }
   .brand h1 { font-size: var(--text-xl); margin: 0; font-weight: 700; line-height: 1.2; }
   .brand-status { margin: 2px 0 0; font-size: var(--text-sm); color: var(--color-text-muted); }
+  .header-end {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .header-self {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: auto max-content;
+    gap: var(--space-3);
+    align-items: stretch;
+  }
+  .btn-qr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    aspect-ratio: 1;
+    width: auto;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+  }
+  .btn-qr:hover {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+    background: var(--color-surface-raised);
+  }
+  .btn-qr-icon { display: block; }
   .self-card {
     display: flex; align-items: center; gap: var(--space-3);
     background: var(--color-surface); border: 1px solid var(--color-border);

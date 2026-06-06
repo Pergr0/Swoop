@@ -38,8 +38,10 @@ core/                platform-agnostic engine (no Wails imports, no CGO)
   protocol/          wire types + constants (DeviceInfo, FileMeta, ports, version)
   identity/          device id + self-signed TLS cert + fingerprint (TOFU)
   discovery/         peer discovery via UDP multicast on ALL interfaces
-  transport/         control plane: HTTPS /api/v1/... (info, handshake)
-  transfer/          data plane: parallel TCP streams (throughput-oriented)
+  transport/         control plane: HTTPS /api/v1/... (info, handshake, web upload)
+  transfer/          data plane: parallel TCP streams + HTTP upload (browser)
+  webpresence/       browser clients in the device grid (POST /api/v1/presence)
+  webui/             embedded mobile browser page (phase 1: phone → desktop)
   staging/           directory scan + sender tree + offer root-dir summaries
   engine.go          orchestrator wiring identity + discovery + transport
 app.go               Wails-bound adapter (exposes SelfInfo, Peers, events)
@@ -91,7 +93,14 @@ host won't see each other (shared identity + control port).
   up + multicast-capable interface (or a single chosen one). Peers are addressed
   by the IP they advertise (their selected/bound interface), falling back to the
   packet source only when none is advertised — correct behind NAT/multi-adapter
-  setups. The UI shows device IP and hostname.
+  setups. `core/discovery` keeps a session-scoped first-seen order so the device
+  grid does not reshuffle on poll; peers unseen for ~12s are dropped and reappear
+  at the end if they return. The UI shows device name and `address:port`.
+  Browser clients that open the desktop upload page also appear in the grid via
+  `POST /api/v1/presence` heartbeats (`core/webpresence`): same name/address/port,
+  plus a parsed User-Agent browser label; platform `web` uses the globe icon.
+  Web tiles are clickable: desktop can stage and send files to the phone (phase 2
+  HTTP pull). Chat is hidden for web peers (browser has no message endpoint).
 - Network interface selection: a startup picker (`core/netif` enumerates up,
   non-loopback IPv4 interfaces with a name, addresses, a kind icon
   (wifi/ethernet/tunnel/virtual/other via `frontend/src/assets/net/`), and
@@ -118,11 +127,27 @@ host won't see each other (shared identity + control port).
   checklist, and receivers get per-root dir counts/sizes in the offer modal.
   Files land under Downloads preserving relative paths. Control channel is TLS
   with peer-fingerprint pinning.
+- Mobile browser: desktop serves `https://<ip>:<controlPort>/` (`core/webui`).
+  **1:1 pairing** — QR or URL ties one browser tab to one desktop host (see
+  `docs/MOBILE-WEB.md`). Phase 1 (phone → desktop): `prepare-upload` + multipart
+  `POST /api/v1/upload/{session}`. Phase 2 (desktop → phone): desktop Send to
+  a web peer; phone polls `GET /api/v1/pull-offer`, shows the file list, user
+  accepts via `POST /api/v1/pull-offer/{session}/respond`, then downloads via
+  `GET /api/v1/download/{session}/{fileId}` (one file) or `…/archive` (temp zip
+  built before accept, deleted after transfer; folders / multiple files).
+  Presence heartbeats keep the phone in the grid; each heartbeat returns an
+  HMAC token bound to `clientId` + source IP (`core/webpresence`), required on
+  pull-offer/respond/download (`X-Swoop-Web-Token`). Chat works both ways:
+  browser `POST /api/v1/message` + `POST /api/v1/read`; desktop→browser via
+  in-memory outbox polled at `GET /api/v1/chat?clientId&since`. Native desktop
+  ↔ desktop keeps `tcp-push` with fail-closed TLS fingerprint pinning (empty
+  fingerprint rejected on send and in discovery).
 - Transfer UI: token-based design (`frontend/src/style.css`, readable 15px base
   type), platform SVG icons on device tiles and self-card (`assets/os/`),
   Swoop logo in the header,
   discovery status, and a
-  self-device card top-right (name, address, port). Network interface is chosen
+  self-device card top-right (name, address, port) plus a QR button that opens a
+  modal with the mobile upload URL. Network interface is chosen
   once at startup (`StartEngine`; not hot-swappable — engine ignores re-start).
   Device grid tiles,
   compact device header, drop zone at the top of the host card, Send button
@@ -160,6 +185,12 @@ host won't see each other (shared identity + control port).
   Messages carry the sender's `Ts` so both endpoints key on the same value.
   `core/chat` owns persistence; `transport.NewPinnedClient`/`VerifyFingerprint`
   is the shared pinned client.
+- Production hardening: incoming offers validated (`ValidateOfferFiles`: file
+  count, per-file and total size caps); `prepare-upload` JSON body capped;
+  TCP data-plane chunk ranges checked against `FileMeta.Size`; control-plane
+  HTTP server uses read/write/idle timeouts; `Engine.Start` marks started only
+  after bind succeeds and `Engine.Close` cancels networking; peer callbacks
+  (`emitPeers`) are panic-contained.
 - Diagnostics: the engine writes a `swoop.log` next to the binary and mirrors
   to stderr
   covering control-plane bind/serve, prepare-upload requests/results, TLS
@@ -199,7 +230,8 @@ host won't see each other (shared identity + control port).
 - mDNS/DNS-SD layered on top of the multicast fallback.
 - QR / manual-IP fallback for networks with client isolation.
 - Windows firewall prompt/rule on first run.
-- Mobile clients (iOS/Android).
+- Mobile browser polish: resumable `Range` pull, WebSocket progress on the phone.
+- Native mobile apps (iOS/Android app store builds).
 
 ## 8. Conventions
 

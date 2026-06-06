@@ -29,6 +29,7 @@ import (
 	"swoop/core/protocol"
 	"swoop/core/transfer"
 	"swoop/core/transport"
+	"swoop/core/webpresence"
 )
 
 // Config configures the engine.
@@ -45,6 +46,7 @@ type Config struct {
 type Engine struct {
 	id           *identity.Identity
 	disco        *discovery.Discoverer
+	webPresence  *webpresence.Registry
 	server       *transport.Server
 	mgr          *transfer.Manager
 	downloadsDir string
@@ -53,12 +55,18 @@ type Engine struct {
 	boundIP string         // advertised IPv4 (chosen interface, or auto)
 	iface   *net.Interface // chosen interface; nil = auto (all interfaces)
 	started bool
+	runCancel context.CancelFunc
 
 	chat    *chat.Store
 	chatLim *rateLimiter
 
 	readMu     sync.Mutex
 	readByPeer map[string]int64 // peerID -> max ts of our out-msgs they've read
+
+	webOutMu      sync.Mutex
+	webOutbox     map[string][]protocol.ChatMessage // pending desktop→browser
+	webReadMu     sync.Mutex
+	webReadNotify map[string]int64 // read receipts queued for browser poll
 
 	onPeers func([]protocol.DeviceInfo)
 	onChat  func(chat.Message)
@@ -89,6 +97,8 @@ func New(cfg Config) (*Engine, error) {
 
 	e.chatLim = newRateLimiter(30, 10*time.Second)
 	e.readByPeer = make(map[string]int64)
+	e.webOutbox = make(map[string][]protocol.ChatMessage)
+	e.webReadNotify = make(map[string]int64)
 	chatPath := filepath.Join(binaryDir(), fmt.Sprintf("swoop-chat-%d.tmp", os.Getpid()))
 	if st, cerr := chat.NewStore(chatPath); cerr == nil {
 		e.chat = st
@@ -101,9 +111,14 @@ func New(cfg Config) (*Engine, error) {
 	return e, nil
 }
 
-// Close releases engine resources. It removes the temporary chat log so no
-// message history survives the app.
+// Close stops networking and releases engine resources. It removes the
+// temporary chat log so no message history survives the app.
 func (e *Engine) Close() {
+	if e.runCancel != nil {
+		e.runCancel()
+		e.runCancel = nil
+	}
+	e.started = false
 	if e.chat != nil {
 		if err := e.chat.Close(); err != nil {
 			e.logf("chat store close: %v", err)
@@ -170,7 +185,7 @@ func (e *Engine) SendTo(deviceID string, items []protocol.SendItem) error {
 	if !ok {
 		return fmt.Errorf("устройство не найдено: %s", deviceID)
 	}
-	if peer.Address == "" || peer.ControlPort == 0 {
+	if peer.Platform != protocol.PlatformWeb && (peer.Address == "" || peer.ControlPort == 0) {
 		return fmt.Errorf("у устройства %q нет адреса для подключения", peer.Name)
 	}
 	return e.mgr.Send(peer, items)
@@ -212,11 +227,28 @@ func (e *Engine) SendMessage(deviceID, text string) error {
 	if !ok {
 		return fmt.Errorf("устройство не найдено")
 	}
+	ts := time.Now().UnixMilli()
+
+	if peer.Platform == protocol.PlatformWeb {
+		msg := protocol.ChatMessage{Sender: e.Self(), Text: text, Ts: ts}
+		e.webOutMu.Lock()
+		e.webOutbox[peer.ID] = append(e.webOutbox[peer.ID], msg)
+		e.webOutMu.Unlock()
+		rec := chat.Message{Ts: ts, PeerID: peer.ID, PeerName: peer.Name, Dir: "out", Text: text}
+		if e.chat != nil {
+			_ = e.chat.Append(rec)
+		}
+		e.emitChat(rec)
+		return nil
+	}
+
+	if peer.Fingerprint == "" {
+		return fmt.Errorf("у устройства %q нет отпечатка TLS", peer.Name)
+	}
 	if peer.Address == "" || peer.ControlPort == 0 {
 		return fmt.Errorf("у устройства %q нет адреса для подключения", peer.Name)
 	}
 
-	ts := time.Now().UnixMilli()
 	body, _ := json.Marshal(protocol.ChatMessage{Sender: e.Self(), Text: text, Ts: ts})
 	client := transport.NewPinnedClient(peer.Fingerprint, 10*time.Second)
 	url := "https://" + net.JoinHostPort(peer.Address, strconv.Itoa(peer.ControlPort)) + "/api/v1/message"
@@ -242,7 +274,7 @@ func (e *Engine) SendMessage(deviceID, text string) error {
 // ReceiveMessage implements transport.MessageHandler: it validates, rate-limits,
 // persists and surfaces an incoming chat message. Text is treated strictly as
 // inert data — never executed or interpreted.
-func (e *Engine) ReceiveMessage(msg protocol.ChatMessage, remoteAddr string) int {
+func (e *Engine) ReceiveMessage(msg protocol.ChatMessage, remoteAddr, webToken string) int {
 	text := msg.Text
 	if text == "" || len(text) > protocol.MaxMessageBytes || !utf8.ValidString(text) {
 		return http.StatusBadRequest
@@ -250,6 +282,11 @@ func (e *Engine) ReceiveMessage(msg protocol.ChatMessage, remoteAddr string) int
 	peerID := msg.Sender.ID
 	if peerID == "" {
 		peerID = remoteAddr
+	}
+	if msg.Sender.Platform == protocol.PlatformWeb {
+		if e.webPresence == nil || !e.webPresence.Verify(peerID, remoteAddr, webToken) {
+			return http.StatusForbidden
+		}
 	}
 	if e.chatLim != nil && !e.chatLim.allow(peerID) {
 		e.logf("chat message from %s (%s) rate-limited", msg.Sender.Name, remoteAddr)
@@ -326,7 +363,18 @@ func (e *Engine) MarkRead(deviceID string) {
 		return // nothing incoming to acknowledge
 	}
 	peer, ok := e.findPeer(deviceID)
-	if !ok || peer.Address == "" || peer.ControlPort == 0 {
+	if !ok {
+		return
+	}
+	if peer.Platform == protocol.PlatformWeb {
+		e.webReadMu.Lock()
+		if upTo > e.webReadNotify[deviceID] {
+			e.webReadNotify[deviceID] = upTo
+		}
+		e.webReadMu.Unlock()
+		return
+	}
+	if peer.Fingerprint == "" || peer.Address == "" || peer.ControlPort == 0 {
 		return
 	}
 	body, _ := json.Marshal(protocol.ReadReceipt{Reader: e.Self(), UpToTs: upTo})
@@ -342,10 +390,15 @@ func (e *Engine) MarkRead(deviceID string) {
 
 // ReceiveRead implements transport.MessageHandler: a peer acknowledges reading
 // our messages up to rr.UpToTs. We bump the per-peer watermark and surface it.
-func (e *Engine) ReceiveRead(rr protocol.ReadReceipt, remoteAddr string) int {
+func (e *Engine) ReceiveRead(rr protocol.ReadReceipt, remoteAddr, webToken string) int {
 	readerID := rr.Reader.ID
 	if readerID == "" {
 		readerID = remoteAddr
+	}
+	if rr.Reader.Platform == protocol.PlatformWeb {
+		if e.webPresence == nil || !e.webPresence.Verify(readerID, remoteAddr, webToken) {
+			return http.StatusForbidden
+		}
 	}
 	if e.chatLim != nil && !e.chatLim.allow("read:"+readerID) {
 		return http.StatusTooManyRequests
@@ -360,6 +413,49 @@ func (e *Engine) ReceiveRead(rr protocol.ReadReceipt, remoteAddr string) int {
 	e.readMu.Unlock()
 	e.emitRead(readerID, rr.UpToTs)
 	return http.StatusOK
+}
+
+// PollWebChat returns pending desktop→browser messages and read receipts for a
+// browser client. Implements transport.WebChatHandler.
+func (e *Engine) PollWebChat(clientID, remoteAddr, webToken string, since int64) (protocol.WebChatPollResponse, int) {
+	if e.webPresence == nil || !e.webPresence.Verify(clientID, remoteAddr, webToken) {
+		return protocol.WebChatPollResponse{}, http.StatusForbidden
+	}
+	var out []protocol.ChatMessage
+	e.webOutMu.Lock()
+	pending := e.webOutbox[clientID]
+	for _, m := range pending {
+		if m.Ts > since {
+			out = append(out, m)
+		}
+	}
+	if len(pending) > 0 {
+		delivered := make(map[int64]struct{}, len(out))
+		for _, m := range out {
+			delivered[m.Ts] = struct{}{}
+		}
+		var remain []protocol.ChatMessage
+		for _, m := range pending {
+			if _, ok := delivered[m.Ts]; !ok {
+				remain = append(remain, m)
+			}
+		}
+		if len(remain) == 0 {
+			delete(e.webOutbox, clientID)
+		} else {
+			e.webOutbox[clientID] = remain
+		}
+	}
+	e.webOutMu.Unlock()
+
+	e.webReadMu.Lock()
+	readUpTo := e.webReadNotify[clientID]
+	e.webReadMu.Unlock()
+
+	if len(out) == 0 && readUpTo <= 0 {
+		return protocol.WebChatPollResponse{}, http.StatusNoContent
+	}
+	return protocol.WebChatPollResponse{Messages: out, ReadUpTo: readUpTo}, http.StatusOK
 }
 
 // rateLimiter is a small per-key sliding-window limiter guarding the message
@@ -388,7 +484,11 @@ func (r *rateLimiter) allow(key string) bool {
 		}
 	}
 	if len(keep) >= r.limit {
-		r.events[key] = keep
+		if len(keep) > 0 {
+			r.events[key] = keep
+		} else {
+			delete(r.events, key)
+		}
 		return false
 	}
 	keep = append(keep, now)
@@ -397,10 +497,7 @@ func (r *rateLimiter) allow(key string) bool {
 }
 
 func (e *Engine) findPeer(id string) (protocol.DeviceInfo, bool) {
-	if e.disco == nil {
-		return protocol.DeviceInfo{}, false
-	}
-	for _, p := range e.disco.Peers() {
+	for _, p := range e.Peers() {
 		if p.ID == id {
 			return p, true
 		}
@@ -428,6 +525,11 @@ func (e *Engine) Self() protocol.DeviceInfo {
 		ControlPort: port,
 		Fingerprint: e.id.Fingerprint,
 		Version:     protocol.Version,
+		Capabilities: []string{
+			protocol.CapTCPPush,
+			protocol.CapHTTPUpload,
+			protocol.CapHTTPPull,
+		},
 	}
 }
 
@@ -472,7 +574,6 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 	if e.started {
 		return nil
 	}
-	e.started = true
 
 	if ifaceName != "" {
 		ip, ifi := interfaceIPv4(ifaceName)
@@ -489,13 +590,10 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 		e.logf("auto-selected advertise IP %q", e.boundIP)
 	}
 
-	stop := make(chan struct{})
-	go func() {
-		<-ctx.Done()
-		close(stop)
-	}()
+	runCtx, runCancel := context.WithCancel(ctx)
 
-	if err := e.mgr.StartDataPlane(stop); err != nil {
+	if err := e.mgr.StartDataPlane(runCtx); err != nil {
+		runCancel()
 		e.logf("data plane failed to start: %v", err)
 		return err
 	}
@@ -504,7 +602,19 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 	e.server = transport.NewServer(e.id, e.Self, e.mgr)
 	e.server.SetLogf(e.logf)
 	e.server.SetMessageHandler(e)
-	if err := e.server.Start(ctx, protocol.DefaultControlPort); err != nil {
+	e.server.SetHTTPUploadHandler(e.mgr)
+	e.server.SetHTTPPullHandler(e.mgr)
+	e.webPresence = webpresence.New(func() int {
+		if e.server != nil {
+			return e.server.Port()
+		}
+		return 0
+	})
+	e.server.SetPresenceHandler(e.webPresence)
+	e.server.SetWebChatHandler(e)
+	e.mgr.SetWebVerifier(e.webPresence.Verify)
+	if err := e.server.Start(runCtx, protocol.DefaultControlPort); err != nil {
+		runCancel()
 		e.logf("control plane failed to bind :%d: %v (is another Swoop instance running?)", protocol.DefaultControlPort, err)
 		return err
 	}
@@ -515,17 +625,41 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 		e.disco.SetInterface(e.iface)
 	}
 	if e.onPeers != nil {
-		e.disco.OnChange(e.onPeers)
+		e.disco.OnChange(func([]protocol.DeviceInfo) { e.emitPeers() })
+		e.webPresence.OnChange(func([]protocol.DeviceInfo) { e.emitPeers() })
 	}
-	return e.disco.Start(ctx)
+	go e.webPresence.Start(runCtx)
+	if err := e.disco.Start(runCtx); err != nil {
+		runCancel()
+		return err
+	}
+	e.runCancel = runCancel
+	e.started = true
+	return nil
 }
 
-// Peers returns the currently known peers.
-func (e *Engine) Peers() []protocol.DeviceInfo {
-	if e.disco == nil {
-		return nil
+func (e *Engine) emitPeers() {
+	if e.onPeers == nil {
+		return
 	}
-	return e.disco.Peers()
+	defer func() {
+		if rec := recover(); rec != nil {
+			e.logf("panic in peers callback: %v", rec)
+		}
+	}()
+	e.onPeers(e.Peers())
+}
+
+// Peers returns LAN-discovered peers followed by connected browser clients.
+func (e *Engine) Peers() []protocol.DeviceInfo {
+	var out []protocol.DeviceInfo
+	if e.disco != nil {
+		out = append(out, e.disco.Peers()...)
+	}
+	if e.webPresence != nil {
+		out = append(out, e.webPresence.Peers()...)
+	}
+	return out
 }
 
 func currentPlatform() protocol.Platform {

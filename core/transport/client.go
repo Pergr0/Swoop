@@ -28,14 +28,13 @@ func NewPinnedClient(fingerprint string, timeout time.Duration) *http.Client {
 }
 
 // VerifyFingerprint checks that the peer's leaf certificate matches the
-// expected "sha256:<hex>" fingerprint. An empty expected value accepts any
-// (used only where pinning is intentionally skipped).
+// expected "sha256:<hex>" fingerprint. Empty expected is rejected (fail closed).
 func VerifyFingerprint(rawCerts [][]byte, expected string) error {
 	if len(rawCerts) == 0 {
 		return errors.New("no peer certificate")
 	}
 	if expected == "" {
-		return nil
+		return errors.New("missing peer fingerprint")
 	}
 	sum := sha256.Sum256(rawCerts[0])
 	if "sha256:"+hex.EncodeToString(sum[:]) != expected {

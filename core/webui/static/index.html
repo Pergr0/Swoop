@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+
+<html lang="ru">
+
+<head>
+
+  <meta charset="utf-8" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+  <meta name="theme-color" content="#0f141b" />
+
+  <title>Swoop — обмен с компьютером</title>
+
+  <style>
+
+    :root {
+
+      color-scheme: dark;
+
+      --bg: #0f141b;
+
+      --surface: #171d27;
+
+      --border: #2a3344;
+
+      --text: #e8edf5;
+
+      --muted: #8b97ab;
+
+      --accent: #3a8bff;
+
+      --ok: #3ddc84;
+
+      --danger: #ff6b6b;
+
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+
+      margin: 0;
+
+      min-height: 100vh;
+
+      background: var(--bg);
+
+      color: var(--text);
+
+      padding: 20px 16px 32px;
+
+    }
+
+    h1 { font-size: 1.35rem; margin: 0 0 4px; }
+
+    .sub { color: var(--muted); font-size: 0.9rem; margin: 0 0 20px; line-height: 1.45; }
+
+    .card {
+
+      background: var(--surface);
+
+      border: 1px solid var(--border);
+
+      border-radius: 14px;
+
+      padding: 16px;
+
+      margin-bottom: 16px;
+
+    }
+
+    .card-title { font-size: 1rem; font-weight: 600; margin: 0 0 10px; }
+
+    .host { font-weight: 600; font-size: 1.05rem; }
+
+    .host-addr {
+
+      font-family: ui-monospace, Consolas, monospace;
+
+      font-size: 0.92rem;
+
+      color: var(--text);
+
+      margin-top: 6px;
+
+      word-break: break-all;
+
+    }
+
+    .fp { font-family: ui-monospace, Consolas, monospace; font-size: 0.8rem; color: var(--muted); margin-top: 6px; word-break: break-all; }
+
+    label.btn {
+
+      display: block;
+
+      text-align: center;
+
+      padding: 14px;
+
+      border: 1px dashed var(--border);
+
+      border-radius: 12px;
+
+      color: var(--muted);
+
+      cursor: pointer;
+
+    }
+
+    input[type=file] { display: none; }
+
+    .files { margin-top: 12px; font-size: 0.9rem; color: var(--muted); }
+
+    button.primary, button.secondary {
+
+      width: 100%;
+
+      margin-top: 12px;
+
+      padding: 14px;
+
+      border: none;
+
+      border-radius: 12px;
+
+      font-size: 1rem;
+
+      font-weight: 600;
+
+      cursor: pointer;
+
+    }
+
+    button.primary {
+
+      background: var(--accent);
+
+      color: #fff;
+
+    }
+
+    button.secondary {
+
+      background: transparent;
+
+      color: var(--muted);
+
+      border: 1px solid var(--border);
+
+    }
+
+    button.primary:disabled, button.secondary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .status { margin-top: 14px; font-size: 0.92rem; min-height: 1.4em; }
+
+    .status.ok { color: var(--ok); }
+
+    .status.err { color: var(--danger); }
+
+    .bar { height: 6px; background: #222a38; border-radius: 3px; overflow: hidden; margin-top: 10px; display: none; }
+
+    .bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 0.2s; }
+
+    .pull-hint { color: var(--muted); font-size: 0.9rem; margin: 0; line-height: 1.45; }
+
+    .pull-from { font-weight: 600; margin: 0 0 8px; }
+
+    .pull-meta { color: var(--muted); font-size: 0.88rem; margin: 0 0 10px; }
+
+    .pull-list {
+
+      list-style: none;
+
+      margin: 0 0 12px;
+
+      padding: 0;
+
+      max-height: 180px;
+
+      overflow: auto;
+
+      font-size: 0.88rem;
+
+      color: var(--muted);
+
+    }
+
+    .pull-list li { padding: 4px 0; border-bottom: 1px solid var(--border); }
+
+    .pull-list li:last-child { border-bottom: none; }
+
+    .pull-actions { display: flex; flex-direction: column; gap: 0; }
+
+    .chat-list {
+      max-height: 220px;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .chat-msg { display: flex; flex-direction: column; max-width: 88%; }
+
+    .chat-in { align-self: flex-start; align-items: flex-start; }
+
+    .chat-out { align-self: flex-end; align-items: flex-end; }
+
+    .chat-bubble {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #1d2c44;
+      border: 1px solid var(--border);
+      font-size: 0.95rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .chat-out .chat-bubble { background: #243352; }
+
+    .chat-meta { font-size: 0.75rem; color: var(--muted); margin-top: 3px; }
+
+    .chat-tick { letter-spacing: -1px; }
+
+    .chat-tick.read { color: var(--accent); }
+
+    .chat-empty { color: var(--muted); font-size: 0.88rem; text-align: center; padding: 8px 0; }
+
+    .chat-form { display: flex; gap: 8px; }
+
+    .chat-form input {
+      flex: 1;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 1rem;
+    }
+
+    .chat-form button {
+      width: auto;
+      margin-top: 0;
+      padding: 12px 16px;
+      white-space: nowrap;
+    }
+
+  </style>
+
+</head>
+
+<body>
+
+  <h1>Swoop</h1>
+
+  <p class="sub">Обмен файлами с компьютером в этой сети. Подключение 1 к 1 — эта страница связана только с этим ПК.</p>
+
+
+
+  <div class="card" id="hostCard">
+
+    <div class="host" id="hostName">Подключение…</div>
+
+    <div class="host-addr" id="hostAddr"></div>
+
+    <div class="fp" id="hostFp"></div>
+
+  </div>
+
+
+
+  <div class="card" id="chatCard">
+
+    <h2 class="card-title">Сообщения</h2>
+
+    <div class="chat-list" id="chatList">
+
+      <div class="chat-empty" id="chatEmpty">Короткие заметки и ссылки с компьютером.</div>
+
+    </div>
+
+    <form class="chat-form" id="chatForm">
+
+      <input id="chatInput" type="text" maxlength="8192" placeholder="Сообщение или ссылка…" autocomplete="off" />
+
+      <button type="submit" class="primary" id="chatSend">Отпр.</button>
+
+    </form>
+
+    <div class="status" id="chatStatus"></div>
+
+  </div>
+
+
+
+  <div class="card" id="pullCard">
+
+    <h2 class="card-title">Получить с компьютера</h2>
+
+    <p class="pull-hint" id="pullHint">Страница открыта — компьютер может отправить файлы. Запрос появится здесь после нажатия «Отправить» на ПК.</p>
+
+    <div id="pullOffer" hidden>
+
+      <p class="pull-from" id="pullFrom"></p>
+
+      <p class="pull-meta" id="pullMeta"></p>
+
+      <ul class="pull-list" id="pullFiles"></ul>
+
+      <div class="pull-actions">
+
+        <button type="button" class="primary" id="pullAccept">Принять и скачать</button>
+
+        <button type="button" class="secondary" id="pullDecline">Отклонить</button>
+
+      </div>
+
+    </div>
+
+    <div class="bar" id="pullBar"><i id="pullBarFill"></i></div>
+
+    <div class="status" id="pullStatus"></div>
+
+  </div>
+
+
+
+  <div class="card">
+
+    <h2 class="card-title">Отправить на компьютер</h2>
+
+    <label class="btn" for="pick">Выбрать файлы</label>
+
+    <input id="pick" type="file" multiple />
+
+    <div class="files" id="fileList">Файлы не выбраны</div>
+
+    <button type="button" class="primary" id="send" disabled>Отправить</button>
+
+    <div class="bar" id="bar"><i id="barFill"></i></div>
+
+    <div class="status" id="status"></div>
+
+  </div>
+
+
+
+  <script>
+
+    const pick = document.getElementById("pick");
+
+    const send = document.getElementById("send");
+
+    const fileList = document.getElementById("fileList");
+
+    const statusEl = document.getElementById("status");
+
+    const bar = document.getElementById("bar");
+
+    const barFill = document.getElementById("barFill");
+
+
+
+    const pullHint = document.getElementById("pullHint");
+
+    const pullOffer = document.getElementById("pullOffer");
+
+    const pullFrom = document.getElementById("pullFrom");
+
+    const pullMeta = document.getElementById("pullMeta");
+
+    const pullFiles = document.getElementById("pullFiles");
+
+    const pullAccept = document.getElementById("pullAccept");
+
+    const pullDecline = document.getElementById("pullDecline");
+
+    const pullStatus = document.getElementById("pullStatus");
+
+    const pullBar = document.getElementById("pullBar");
+
+    const pullBarFill = document.getElementById("pullBarFill");
+
+
+
+    let selected = [];
+
+    let currentOffer = null;
+
+    let pullBusy = false;
+
+
+
+    function setStatus(text, kind) {
+
+      statusEl.textContent = text;
+
+      statusEl.className = "status" + (kind ? " " + kind : "");
+
+    }
+
+
+
+    function setPullStatus(text, kind) {
+
+      pullStatus.textContent = text;
+
+      pullStatus.className = "status" + (kind ? " " + kind : "");
+
+    }
+
+
+
+    function shortFp(fp) {
+
+      return (fp || "").replace(/^sha256:/, "").slice(0, 8).toUpperCase();
+
+    }
+
+
+
+    function hostEndpoint(info) {
+
+      const addr = info.address || info.host || location.hostname || "";
+
+      const port = info.controlPort || (location.port ? parseInt(location.port, 10) : 0);
+
+      if (addr && port > 0) return addr + ":" + port;
+
+      return addr;
+
+    }
+
+
+
+    async function loadInfo() {
+
+      const res = await fetch("/api/v1/info");
+
+      if (!res.ok) throw new Error("не удалось получить информацию о хосте");
+
+      const info = await res.json();
+
+      document.getElementById("hostName").textContent = info.name || "Swoop";
+
+      const endpoint = hostEndpoint(info);
+
+      document.getElementById("hostAddr").textContent = endpoint ? endpoint : "";
+
+      document.getElementById("hostFp").textContent = "Отпечаток " + shortFp(info.fingerprint);
+
+      return info;
+
+    }
+
+
+
+    pick.addEventListener("change", () => {
+
+      selected = Array.from(pick.files || []);
+
+      if (!selected.length) {
+
+        fileList.textContent = "Файлы не выбраны";
+
+        send.disabled = true;
+
+        return;
+
+      }
+
+      const total = selected.reduce((a, f) => a + f.size, 0);
+
+      fileList.textContent = selected.length + " файл(ов) · " + formatBytes(total);
+
+      send.disabled = false;
+
+    });
+
+
+
+    function formatBytes(n) {
+
+      if (!n) return "0 B";
+
+      const u = ["B", "KB", "MB", "GB"];
+
+      const i = Math.min(u.length - 1, Math.floor(Math.log(n) / Math.log(1024)));
+
+      return (n / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1) + " " + u[i];
+
+    }
+
+
+
+    const CLIENT_KEY = "swoop-web-id";
+    const WEB_TOKEN_KEY = "swoop-web-token";
+    const WEB_TOKEN_HEADER = "X-Swoop-Web-Token";
+
+
+
+    function randomId() {
+
+      if (crypto.randomUUID) return crypto.randomUUID();
+
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+
+        const r = (Math.random() * 16) | 0;
+
+        return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+
+      });
+
+    }
+
+
+
+    function clientId() {
+
+      let id = sessionStorage.getItem(CLIENT_KEY);
+
+      if (!id) {
+
+        id = "web-" + randomId();
+
+        sessionStorage.setItem(CLIENT_KEY, id);
+
+      }
+
+      return id;
+
+    }
+
+
+
+    function clientName() {
+
+      const ua = navigator.userAgent || "";
+
+      if (/iPhone|iPad|iPod/i.test(ua)) return "iPhone";
+
+      if (/Android/i.test(ua)) return "Телефон";
+
+      return "Браузер";
+
+    }
+
+
+
+    function webToken() {
+      return sessionStorage.getItem(WEB_TOKEN_KEY) || "";
+    }
+
+    function webHeaders(extra) {
+      const h = Object.assign({}, extra || {});
+      const tok = webToken();
+      if (tok) h[WEB_TOKEN_HEADER] = tok;
+      return h;
+    }
+
+    const CHAT_SINCE_KEY = "swoop-chat-since";
+
+    const chatList = document.getElementById("chatList");
+    const chatEmpty = document.getElementById("chatEmpty");
+    const chatForm = document.getElementById("chatForm");
+    const chatInput = document.getElementById("chatInput");
+    const chatSend = document.getElementById("chatSend");
+    const chatStatus = document.getElementById("chatStatus");
+
+    let chatMessages = [];
+    let chatSince = parseInt(sessionStorage.getItem(CHAT_SINCE_KEY) || "0", 10) || 0;
+    let chatReadUpTo = 0;
+    let chatSending = false;
+    function fmtChatTime(ts) {
+      try {
+        return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function setChatStatus(text, kind) {
+      chatStatus.textContent = text || "";
+      chatStatus.className = "status" + (kind ? " " + kind : "");
+    }
+
+    function scrollChat() {
+      chatList.scrollTop = chatList.scrollHeight;
+    }
+
+    function renderChat() {
+      const nodes = chatMessages.map((m) => {
+        const row = document.createElement("div");
+        row.className = "chat-msg " + (m.dir === "out" ? "chat-out" : "chat-in");
+        const bubble = document.createElement("div");
+        bubble.className = "chat-bubble";
+        bubble.textContent = m.text;
+        const meta = document.createElement("div");
+        meta.className = "chat-meta";
+        let tick = "";
+        if (m.dir === "out") {
+          tick = m.read ? ' <span class="chat-tick read" title="Прочитано">✓✓</span>' : ' <span class="chat-tick" title="Доставлено">✓✓</span>';
+        }
+        meta.innerHTML = fmtChatTime(m.ts) + tick;
+        row.appendChild(bubble);
+        row.appendChild(meta);
+        return row;
+      });
+      chatList.innerHTML = "";
+      if (!nodes.length) {
+        chatEmpty.hidden = false;
+        chatList.appendChild(chatEmpty);
+      } else {
+        chatEmpty.hidden = true;
+        for (const n of nodes) chatList.appendChild(n);
+      }
+      scrollChat();
+    }
+
+    function chatSender() {
+      return {
+        id: clientId(),
+        name: clientName(),
+        platform: "web",
+      };
+    }
+
+    async function markChatRead() {
+      let upTo = 0;
+      for (const m of chatMessages) {
+        if (m.dir === "in" && m.ts > upTo) upTo = m.ts;
+      }
+      if (upTo <= 0 || !webToken()) return;
+      try {
+        await fetch("/api/v1/read", {
+          method: "POST",
+          headers: webHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ reader: chatSender(), upToTs: upTo }),
+        });
+      } catch (_) {}
+    }
+
+    async function pollChat() {
+      if (!webToken()) return;
+      try {
+        const url = "/api/v1/chat?clientId=" + encodeURIComponent(clientId()) + "&since=" + encodeURIComponent(String(chatSince));
+        const res = await fetch(url, { headers: webHeaders() });
+        if (res.status === 204) return;
+        if (!res.ok) return;
+        const data = await res.json();
+        let changed = false;
+        for (const m of data.messages || []) {
+          if (!m || !m.text) continue;
+          chatMessages.push({ dir: "in", text: m.text, ts: m.ts || Date.now(), read: false });
+          if ((m.ts || 0) > chatSince) chatSince = m.ts;
+          changed = true;
+        }
+        if (chatSince > 0) sessionStorage.setItem(CHAT_SINCE_KEY, String(chatSince));
+        const upTo = data.readUpTo || 0;
+        if (upTo > chatReadUpTo) {
+          chatReadUpTo = upTo;
+          for (const m of chatMessages) {
+            if (m.dir === "out" && m.ts <= upTo) m.read = true;
+          }
+          changed = true;
+        }
+        if (changed) {
+          renderChat();
+          markChatRead();
+        }
+      } catch (_) {}
+    }
+
+    async function sendChatMessage(text) {
+      if (!text || chatSending) return;
+      chatSending = true;
+      chatSend.disabled = true;
+      setChatStatus("");
+      const ts = Date.now();
+      try {
+        const res = await fetch("/api/v1/message", {
+          method: "POST",
+          headers: webHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ sender: chatSender(), text: text, ts: ts }),
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        chatMessages.push({ dir: "out", text: text, ts: ts, read: false });
+        chatInput.value = "";
+        renderChat();
+      } catch (e) {
+        setChatStatus(String(e.message || e), "err");
+      } finally {
+        chatSending = false;
+        chatSend.disabled = false;
+      }
+    }
+
+    chatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = (chatInput.value || "").trim();
+      if (text) sendChatMessage(text);
+    });
+
+    async function sendPresence() {
+      const res = await fetch("/api/v1/presence", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: clientId(), name: clientName() }),
+      });
+      if (res.ok) {
+        try {
+          const data = await res.json();
+          if (data && data.token) sessionStorage.setItem(WEB_TOKEN_KEY, data.token);
+        } catch (_) {}
+      }
+    }
+
+
+
+    function showPullOffer(offer) {
+
+      pullHint.hidden = true;
+
+      pullOffer.hidden = false;
+
+      pullFrom.textContent = (offer.sender && offer.sender.name ? offer.sender.name : "Компьютер") + " хочет отправить файлы";
+
+      const archive = (offer.count || 0) > 1 || (offer.files || []).some((f) => f.relPath && f.relPath.indexOf("/") >= 0);
+
+      pullMeta.textContent = offer.count + " файл(ов) · " + formatBytes(offer.totalSize || 0) + (archive ? " · будет скачан .zip" : "");
+
+      pullFiles.innerHTML = "";
+
+      const preview = (offer.files || []).slice(0, 12);
+
+      for (const f of preview) {
+
+        const li = document.createElement("li");
+
+        const label = f.relPath ? f.relPath.replace(/\//g, " / ") : f.name;
+
+        li.textContent = label + " · " + formatBytes(f.size || 0);
+
+        pullFiles.appendChild(li);
+
+      }
+
+      if ((offer.files || []).length > 12) {
+
+        const li = document.createElement("li");
+
+        li.textContent = "… ещё " + ((offer.files || []).length - 12);
+
+        pullFiles.appendChild(li);
+
+      }
+
+    }
+
+
+
+    function hidePullOffer() {
+
+      currentOffer = null;
+
+      pullOffer.hidden = true;
+
+      pullHint.hidden = false;
+
+      pullAccept.disabled = false;
+
+      pullDecline.disabled = false;
+
+    }
+
+
+
+    async function pollPullOffer() {
+
+      if (pullBusy || currentOffer) return;
+
+      try {
+
+        const res = await fetch("/api/v1/pull-offer?clientId=" + encodeURIComponent(clientId()), {
+          headers: webHeaders(),
+        });
+
+        if (res.status === 204) return;
+
+        if (!res.ok) return;
+
+        const offer = await res.json();
+
+        if (!offer || !offer.sessionId) return;
+
+        currentOffer = offer;
+
+        showPullOffer(offer);
+
+      } catch (_) {}
+
+    }
+
+
+
+    function downloadName(f) {
+
+      if (f.relPath) return f.relPath.replace(/\//g, "_");
+
+      return f.name || "file";
+
+    }
+
+
+
+    function saveBlob(blob, name) {
+
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+
+      a.href = url;
+
+      a.download = name;
+
+      a.rel = "noopener";
+
+      document.body.appendChild(a);
+
+      a.click();
+
+      a.remove();
+
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+    }
+
+
+
+    function setPullProgress(loaded, total, label) {
+
+      const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+
+      pullBarFill.style.width = pct + "%";
+
+      const sizeLabel = total > 0
+
+        ? formatBytes(loaded) + " / " + formatBytes(total)
+
+        : formatBytes(loaded);
+
+      setPullStatus((label || "Скачивание") + " · " + pct + "% · " + sizeLabel);
+
+    }
+
+
+
+    function downloadBlob(url, token, total, label) {
+
+      return new Promise((resolve, reject) => {
+
+        const xhr = new XMLHttpRequest();
+
+        xhr.open("GET", url);
+
+        xhr.setRequestHeader("X-Swoop-Token", token);
+        const wt = webToken();
+        if (wt) xhr.setRequestHeader(WEB_TOKEN_HEADER, wt);
+
+        xhr.responseType = "blob";
+
+        xhr.onprogress = (ev) => {
+
+          const loaded = ev.loaded;
+
+          const t = ev.lengthComputable && ev.total > 0 ? ev.total : total;
+
+          setPullProgress(loaded, t, label);
+
+        };
+
+        xhr.onload = () => {
+
+          if (xhr.status >= 200 && xhr.status < 300) {
+
+            const blob = xhr.response;
+
+            const doneTotal = total > 0 ? total : (blob ? blob.size : 0);
+
+            setPullProgress(doneTotal, doneTotal, label);
+
+            resolve(blob);
+
+          } else {
+
+            reject(new Error("Ошибка скачивания: HTTP " + xhr.status));
+
+          }
+
+        };
+
+        xhr.onerror = () => reject(new Error("Сеть недоступна"));
+
+        xhr.send();
+
+      });
+
+    }
+
+
+
+    async function downloadPullFiles(resp) {
+
+      pullBar.style.display = "block";
+
+      pullBarFill.style.width = "0%";
+
+      if (resp.archivePath) {
+
+        const name = resp.archiveName || "Swoop-files.zip";
+
+        const total = resp.archiveSize || 0;
+
+        const blob = await downloadBlob(resp.archivePath, resp.token, total, "Архив " + name);
+
+        const minSize = total > 0 ? Math.max(32, Math.floor(total * 0.5)) : 32;
+
+        if (!blob || blob.size < minSize) {
+
+          throw new Error("архив не получен (пустой ответ)");
+
+        }
+
+        saveBlob(blob, name);
+
+        return;
+
+      }
+
+      const files = resp.files || [];
+
+      if (files.length !== 1) throw new Error("неожиданный ответ сервера");
+
+      const f = files[0];
+
+      const label = downloadName(f);
+
+      const blob = await downloadBlob(f.downloadPath, resp.token, f.size || 0, label);
+
+      if (!blob || (f.size > 0 && blob.size < f.size)) {
+
+        throw new Error("файл получен не полностью");
+
+      }
+
+      saveBlob(blob, label);
+
+    }
+
+
+
+    async function respondPull(accept) {
+
+      if (!currentOffer || pullBusy) return;
+
+      pullBusy = true;
+
+      pullAccept.disabled = true;
+
+      pullDecline.disabled = true;
+
+      try {
+
+        const res = await fetch("/api/v1/pull-offer/" + encodeURIComponent(currentOffer.sessionId) + "/respond", {
+          method: "POST",
+          headers: webHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ clientId: clientId(), accept: accept }),
+        });
+
+        if (!accept) {
+
+          hidePullOffer();
+
+          setPullStatus("Передача отклонена");
+
+          return;
+
+        }
+
+        if (res.status === 403) {
+
+          setPullStatus("Отклонено", "err");
+
+          hidePullOffer();
+
+          return;
+
+        }
+
+        if (!res.ok) {
+
+          setPullStatus("Ошибка: HTTP " + res.status, "err");
+
+          hidePullOffer();
+
+          return;
+
+        }
+
+        const resp = await res.json();
+
+        await downloadPullFiles(resp);
+
+        setPullStatus("Готово! Файлы сохранены.", "ok");
+
+        pullBarFill.style.width = "100%";
+
+        hidePullOffer();
+
+      } catch (e) {
+
+        setPullStatus(String(e.message || e), "err");
+
+        hidePullOffer();
+
+      } finally {
+
+        pullBusy = false;
+
+      }
+
+    }
+
+
+
+    pullAccept.addEventListener("click", () => respondPull(true));
+
+    pullDecline.addEventListener("click", () => respondPull(false));
+
+
+
+    send.addEventListener("click", async () => {
+
+      if (!selected.length) return;
+
+      send.disabled = true;
+
+      bar.style.display = "block";
+
+      barFill.style.width = "0%";
+
+      setStatus("Ожидание подтверждения на компьютере…");
+
+
+
+      const sender = {
+
+        id: clientId(),
+
+        name: clientName(),
+
+        host: "",
+
+        address: "",
+
+        platform: "web",
+
+        controlPort: 0,
+
+        fingerprint: "",
+
+        version: 1,
+
+      };
+
+
+
+      const files = selected.map((f) => ({
+
+        id: randomId(),
+
+        name: f.name,
+
+        relPath: "",
+
+        size: f.size,
+
+        mime: f.type || "application/octet-stream",
+
+      }));
+
+
+
+      try {
+
+        const prep = await fetch("/api/v1/prepare-upload", {
+
+          method: "POST",
+
+          headers: { "Content-Type": "application/json" },
+
+          body: JSON.stringify({ sender, files }),
+
+        });
+
+        if (prep.status === 403) {
+
+          setStatus("Получатель отклонил передачу", "err");
+
+          send.disabled = false;
+
+          return;
+
+        }
+
+        if (prep.status === 409) {
+
+          setStatus("Компьютер занят другой передачей", "err");
+
+          send.disabled = false;
+
+          return;
+
+        }
+
+        if (prep.status === 408) {
+
+          setStatus("Время ожидания истекло", "err");
+
+          send.disabled = false;
+
+          return;
+
+        }
+
+        if (!prep.ok) {
+
+          setStatus("Ошибка handshake: HTTP " + prep.status, "err");
+
+          send.disabled = false;
+
+          return;
+
+        }
+
+        const resp = await prep.json();
+
+        if (resp.mode !== "http-upload" || !resp.uploadPath) {
+
+          setStatus("Хост не поддерживает загрузку из браузера", "err");
+
+          send.disabled = false;
+
+          return;
+
+        }
+
+
+
+        setStatus("Загрузка…");
+
+        const fd = new FormData();
+
+        for (const f of selected) fd.append("file", f);
+
+
+
+        await uploadWithProgress(resp.uploadPath, resp.token, fd, selected.reduce((a, f) => a + f.size, 0));
+
+        setStatus("Готово! Файлы на компьютере.", "ok");
+
+        barFill.style.width = "100%";
+
+      } catch (e) {
+
+        setStatus(String(e.message || e), "err");
+
+        send.disabled = false;
+
+      }
+
+    });
+
+
+
+    function uploadWithProgress(path, token, body, total) {
+
+      return new Promise((resolve, reject) => {
+
+        const xhr = new XMLHttpRequest();
+
+        xhr.open("POST", path);
+
+        xhr.setRequestHeader("X-Swoop-Token", token);
+
+        xhr.upload.onprogress = (ev) => {
+
+          if (ev.lengthComputable && total > 0) {
+
+            barFill.style.width = Math.round((ev.loaded / total) * 100) + "%";
+
+          }
+
+        };
+
+        xhr.onload = () => {
+
+          if (xhr.status >= 200 && xhr.status < 300) resolve();
+
+          else reject(new Error("Ошибка загрузки: HTTP " + xhr.status));
+
+        };
+
+        xhr.onerror = () => reject(new Error("Сеть недоступна"));
+
+        xhr.send(body);
+
+      });
+
+    }
+
+
+
+    loadInfo()
+
+      .then(() => {
+
+        renderChat();
+
+        sendPresence().catch(() => {});
+
+        setInterval(() => sendPresence().catch(() => {}), 8000);
+
+        pollPullOffer();
+
+        setInterval(pollPullOffer, 2000);
+
+        pollChat();
+
+        setInterval(pollChat, 2000);
+
+      })
+
+      .catch((e) => setStatus(e.message, "err"));
+
+  </script>
+
+</body>
+
+</html>
+
+

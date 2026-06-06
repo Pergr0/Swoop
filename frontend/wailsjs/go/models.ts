@@ -61,6 +61,8 @@ export namespace protocol {
 	    controlPort: number;
 	    fingerprint: string;
 	    version: number;
+	    capabilities?: string[];
+	    browser?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeviceInfo(source);
@@ -76,6 +78,8 @@ export namespace protocol {
 	        this.controlPort = source["controlPort"];
 	        this.fingerprint = source["fingerprint"];
 	        this.version = source["version"];
+	        this.capabilities = source["capabilities"];
+	        this.browser = source["browser"];
 	    }
 	}
 	export class SendItem {

@@ -101,6 +101,13 @@ type Manager struct {
 	onProgress func(Progress)
 	onState    func(State)
 	logf       func(string, ...any)
+
+	webVerify func(clientID, remoteAddr, webToken string) bool
+}
+
+// SetWebVerifier installs browser client HMAC verification for HTTP pull APIs.
+func (m *Manager) SetWebVerifier(fn func(clientID, remoteAddr, webToken string) bool) {
+	m.webVerify = fn
 }
 
 // NewManager creates a transfer manager. downloadsDir is where received files
@@ -165,7 +172,7 @@ func (m *Manager) emitState(s State) {
 }
 
 // StartDataPlane binds the raw-TCP data listener and serves until ctx is done.
-func (m *Manager) StartDataPlane(stop <-chan struct{}) error {
+func (m *Manager) StartDataPlane(ctx context.Context) error {
 	ln, err := net.Listen("tcp", ":"+strconv.Itoa(protocol.DefaultDataPort))
 	if err != nil {
 		// Fall back to an OS-chosen port.
@@ -177,7 +184,7 @@ func (m *Manager) StartDataPlane(stop <-chan struct{}) error {
 	m.dataPort = ln.Addr().(*net.TCPAddr).Port
 
 	go func() {
-		<-stop
+		<-ctx.Done()
 		_ = ln.Close()
 	}()
 	go func() {
@@ -202,6 +209,7 @@ type recvSession struct {
 	files     []protocol.FileMeta
 	total     int64
 	token     string
+	mode      string // protocol.TransferTCPPush or TransferHTTPUpload
 	decision  chan bool
 	handles   []*os.File
 	destPaths []string
@@ -223,9 +231,15 @@ func (s *recvSession) canceled() bool { return atomic.LoadInt32(&s.cancel) == 1 
 
 // PrepareUpload implements transport.UploadHandler. It registers the offer,
 // notifies the UI, and blocks until the user accepts/declines or it times out.
-func (m *Manager) PrepareUpload(req protocol.PrepareUploadRequest, _ string) (protocol.PrepareUploadResponse, int) {
-	if len(req.Files) == 0 {
+func (m *Manager) PrepareUpload(req protocol.PrepareUploadRequest, remoteAddr string) (protocol.PrepareUploadResponse, int) {
+	if err := ValidateOfferFiles(req.Files); err != nil {
+		m.logf("incoming offer from %s rejected: %v", req.Sender.Name, err)
 		return protocol.PrepareUploadResponse{}, http.StatusBadRequest
+	}
+	if req.Sender.Platform == protocol.PlatformWeb && remoteAddr != "" {
+		if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+			req.Sender.Address = host
+		}
 	}
 
 	m.mu.Lock()
@@ -287,7 +301,24 @@ func (m *Manager) PrepareUpload(req protocol.PrepareUploadRequest, _ string) (pr
 	if total == 0 {
 		sess.finalizeRecv(m, true)
 	}
-	return protocol.PrepareUploadResponse{SessionID: sess.id, DataPort: m.dataPort, Token: sess.token}, http.StatusOK
+
+	if req.Sender.Platform == protocol.PlatformWeb {
+		sess.mode = protocol.TransferHTTPUpload
+		return protocol.PrepareUploadResponse{
+			SessionID:  sess.id,
+			Mode:       protocol.TransferHTTPUpload,
+			Token:      sess.token,
+			UploadPath: "/api/v1/upload/" + sess.id,
+		}, http.StatusOK
+	}
+
+	sess.mode = protocol.TransferTCPPush
+	return protocol.PrepareUploadResponse{
+		SessionID: sess.id,
+		Mode:      protocol.TransferTCPPush,
+		DataPort:  m.dataPort,
+		Token:     sess.token,
+	}, http.StatusOK
 }
 
 // RespondIncoming resolves the pending incoming offer.
@@ -378,8 +409,14 @@ func (m *Manager) handleDataConn(conn net.Conn) {
 		fi := binary.BigEndian.Uint32(hdr[0:4])
 		off := int64(binary.BigEndian.Uint64(hdr[4:12]))
 		ln := int64(binary.BigEndian.Uint64(hdr[12:20]))
-		if int(fi) >= len(sess.handles) {
+		if int(fi) >= len(sess.handles) || int(fi) >= len(sess.files) {
 			sess.setErr(errors.New("bad file index"))
+			sess.finalizeRecv(m, false)
+			return
+		}
+		fileSize := sess.files[fi].Size
+		if ln < 0 || off < 0 || off+ln > fileSize {
+			sess.setErr(errors.New("invalid chunk range"))
 			sess.finalizeRecv(m, false)
 			return
 		}
@@ -475,16 +512,25 @@ func (m *Manager) clearIncoming(sess *recvSession) {
 // ---------------------------------------------------------------------------
 
 type sendSession struct {
+	id       string
 	peer     protocol.DeviceInfo
 	files    []protocol.FileMeta
 	srcPaths []string
 	total    int64
+	token    string
 
 	sent  int64 // atomic
 	start time.Time
 
 	stop   chan struct{}
 	cancel int32 // atomic; 1 = canceled by user
+
+	webDecision  chan bool
+	pullDone     map[string]bool
+	pullDoneMu   sync.Mutex
+	pullWait     chan struct{}
+	pullWaitOnce sync.Once
+	archiveTemp  string // temp .zip for multi-file browser pull; removed after session
 
 	httpCancel   context.CancelFunc
 	httpCancelMu sync.Mutex
@@ -532,6 +578,14 @@ type chunk struct {
 // Send starts an outgoing transfer to peer. Returns an error immediately if a
 // transfer is already in progress or there are no files.
 func (m *Manager) Send(peer protocol.DeviceInfo, items []protocol.SendItem) error {
+	if peer.Platform != protocol.PlatformWeb {
+		if peer.Fingerprint == "" {
+			return errors.New("у устройства нет отпечатка TLS")
+		}
+		if peer.Address == "" || peer.ControlPort == 0 {
+			return errors.New("у устройства нет адреса для подключения")
+		}
+	}
 	files, srcPaths, total, err := resolveSendFiles(items)
 	if err != nil {
 		return err
@@ -543,11 +597,17 @@ func (m *Manager) Send(peer protocol.DeviceInfo, items []protocol.SendItem) erro
 		return errors.New("идёт другая отправка")
 	}
 	sess := &sendSession{
+		id:       randHex(8),
 		peer:     peer,
 		files:    files,
 		srcPaths: srcPaths,
 		total:    total,
 		stop:     make(chan struct{}),
+	}
+	if peer.Platform == protocol.PlatformWeb {
+		sess.webDecision = make(chan bool, 1)
+		sess.pullDone = make(map[string]bool)
+		sess.pullWait = make(chan struct{})
 	}
 	m.outgoing = sess
 	m.mu.Unlock()
@@ -565,6 +625,13 @@ func (m *Manager) CancelOutgoing() {
 		return
 	}
 	atomic.StoreInt32(&sess.cancel, 1)
+	if sess.webDecision != nil && sess.token == "" {
+		select {
+		case sess.webDecision <- false:
+		default:
+		}
+	}
+	m.removePullArchive(sess)
 	sess.abortHTTP()
 	sess.closeConns()
 }
@@ -580,6 +647,11 @@ func (m *Manager) clearOutgoing(sess *sendSession) {
 func (m *Manager) runSend(sess *sendSession) {
 	defer m.clearOutgoing(sess)
 	peer := sess.peer
+
+	if peer.Platform == protocol.PlatformWeb {
+		m.runSendWebPull(sess)
+		return
+	}
 
 	m.logf("send to %s (%s:%d): %d file(s), %d bytes", peer.Name, peer.Address, peer.ControlPort, len(sess.files), sess.total)
 	m.emitState(State{Direction: DirSend, State: "waiting", Message: "Ожидание подтверждения...", Peer: peer.Name})
@@ -1085,7 +1157,7 @@ func verifyFingerprint(rawCerts [][]byte, expected string) error {
 		return errors.New("no peer certificate")
 	}
 	if expected == "" {
-		return nil
+		return errors.New("missing peer fingerprint")
 	}
 	sum := sha256.Sum256(rawCerts[0])
 	if "sha256:"+hex.EncodeToString(sum[:]) != expected {
