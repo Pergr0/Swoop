@@ -1,0 +1,180 @@
+/* Swoop design tokens — comfortable reading sizes (min 13px captions). */
+
+:root {
+  color-scheme: dark;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI Variable", "Segoe UI", Roboto, Cantarell,
+    "Noto Sans", Ubuntu, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+
+  --text-xs: 13px;
+  --text-sm: 14px;
+  --text-base: 15px;
+  --text-md: 16px;
+  --text-lg: 18px;
+  --text-xl: 22px;
+  --text-2xl: 26px;
+
+  --color-bg: #0f141b;
+  --color-surface: #19212c;
+  --color-surface-raised: #1d2735;
+  --color-surface-inset: #141b24;
+  --color-border: #232f3d;
+  --color-border-strong: #2f3e50;
+  --color-text: #e7edf3;
+  --color-text-secondary: #aebfd0;
+  --color-text-muted: #8195a8;
+  --color-text-faint: #6f8298;
+  --color-accent: #3a8bff;
+  --color-accent-hover: #5a9fff;
+  --color-accent-muted: #9fd0ff;
+  --color-success: #3ddc84;
+  --color-success-bg: #16321f;
+  --color-success-text: #74e09a;
+  --color-danger: #ff9aa2;
+  --color-danger-bg: #321a1f;
+  --color-danger-border: #5a2a35;
+  --color-warn-bg: #2a2f38;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+  --radius-xl: 16px;
+  --radius-btn: var(--radius-md);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+
+  --shadow-focus: 0 0 0 2px var(--color-bg), 0 0 0 4px var(--color-accent);
+  --transition-fast: 0.12s ease;
+  --transition-normal: 0.18s ease;
+
+  /* Scrollbar track — reserve space so thumbs do not cover content. */
+  --scrollbar-size: 10px;
+  --scrollbar-pad: 12px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root.auto-theme {
+    color-scheme: light;
+    --color-bg: #f3f6fa;
+    --color-surface: #ffffff;
+    --color-surface-raised: #f8fafc;
+    --color-surface-inset: #eef2f7;
+    --color-border: #d8e0ea;
+    --color-border-strong: #c2cedc;
+    --color-text: #1a2332;
+    --color-text-secondary: #3d4f63;
+    --color-text-muted: #5a6d82;
+    --color-text-faint: #7a8fa3;
+    --color-accent-muted: #2563c7;
+    --color-danger-bg: #fde8ea;
+    --color-danger-border: #f5b8bf;
+    --color-success-bg: #e3f8ec;
+    --color-warn-bg: #eef2f7;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  width: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+#app {
+  height: 100vh;
+  overflow: hidden;
+}
+
+/*
+ * One scroll container per view; use .scroll-y on that container only.
+ * Nested .scroll-y regions break wheel routing on Linux WebKitGTK.
+ */
+.scroll-y {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  /* Fallback when gutter is unsupported (common on older WebKitGTK). */
+  padding-inline-end: var(--scrollbar-pad);
+  touch-action: pan-y;
+}
+
+@supports (scrollbar-gutter: stable) {
+  .scroll-y {
+    padding-inline-end: 6px;
+  }
+}
+
+.scroll-y {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 159, 200, 0.45) transparent;
+}
+
+.scroll-y::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+.scroll-y::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroll-y::-webkit-scrollbar-thumb {
+  background-color: rgba(127, 159, 200, 0.38);
+  border-radius: 99px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+.scroll-y::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(127, 159, 200, 0.58);
+}
+
+.scroll-y::-webkit-scrollbar-thumb:active {
+  background-color: rgba(58, 139, 255, 0.72);
+}
+
+.scroll-y::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Shared interactive focus ring */
+:where(button, a, input, [tabindex]):focus {
+  outline: none;
+}
+
+:where(button, a, input, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+}

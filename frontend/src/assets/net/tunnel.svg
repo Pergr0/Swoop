@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="VPN tunnel">
+  <path fill="none" stroke="#B39DDB" stroke-width="2.2" stroke-linecap="round" d="M6 16h20"/>
+  <rect x="11" y="8" width="10" height="16" rx="5" fill="none" stroke="#B39DDB" stroke-width="2"/>
+  <path fill="#B39DDB" d="M16 13.5a2.8 2.8 0 00-2.8 2.8v1.2h5.6v-1.2A2.8 2.8 0 0016 13.5zm-1.2 6.2v1.8h2.4v-1.8h-2.4z"/>
+</svg>

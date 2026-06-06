@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Wi-Fi">
+  <path fill="none" stroke="#9FD0FF" stroke-width="2.2" stroke-linecap="round" d="M5.5 20.5a11.5 11.5 0 0 1 21 0"/>
+  <path fill="none" stroke="#9FD0FF" stroke-width="2.2" stroke-linecap="round" d="M9.5 20.5a7.5 7.5 0 0 1 13 0"/>
+  <path fill="none" stroke="#3A8BFF" stroke-width="2.2" stroke-linecap="round" d="M13 20.5a4 4 0 0 1 6 0"/>
+  <circle cx="16" cy="26" r="2.2" fill="#3A8BFF"/>
+</svg>

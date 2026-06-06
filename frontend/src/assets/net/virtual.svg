@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Virtual adapter">
+  <rect x="5" y="9" width="16" height="12" rx="1.5" fill="#4A5568" stroke="#9FD0FF" stroke-width="1.5"/>
+  <rect x="11" y="13" width="16" height="12" rx="1.5" fill="#2D3748" stroke="#3DDC84" stroke-width="1.5"/>
+  <rect x="13" y="15" width="12" height="8" rx="1" fill="#3A8BFF" opacity=".35"/>
+  <path fill="#4A5568" d="M10 21h4v2H10v-2zm12 4h6v2h-6v-2z"/>
+</svg>
