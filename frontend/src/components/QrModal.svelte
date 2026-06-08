@@ -1,5 +1,6 @@
 <script lang="ts">
   import QRCode from "qrcode";
+  import { t } from "../i18n";
 
   export let open = false;
   export let url = "";
@@ -28,15 +29,15 @@
 {#if open}
   <div class="modal-overlay" role="presentation" on:click={backdropClick}>
     <div class="modal modal-qr" role="dialog" aria-labelledby="qr-title" aria-modal="true">
-      <button type="button" class="modal-close" aria-label="Закрыть" on:click={onClose}>
+      <button type="button" class="modal-close" aria-label={t("qr.closeAria")} on:click={onClose}>
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
           <path fill="currentColor" d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7 4.3 4.3l6.3 6.3 6.3-6.3z"/>
         </svg>
       </button>
-      <h3 id="qr-title">Отправка с телефона</h3>
-      <p class="modal-sub">Отсканируйте QR-код камерой телефона (та же Wi‑Fi сеть)</p>
+      <h3 id="qr-title">{t("qr.title")}</h3>
+      <p class="modal-sub">{t("qr.sub")}</p>
       {#if dataUrl}
-        <img class="qr-image" src={dataUrl} width="280" height="280" alt="QR-код со ссылкой на отправку файлов" />
+        <img class="qr-image" src={dataUrl} width="280" height="280" alt={t("qr.alt")} />
       {:else}
         <div class="qr-placeholder" aria-hidden="true"></div>
       {/if}

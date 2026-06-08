@@ -26,6 +26,7 @@
   import TransferPanel from "./components/TransferPanel.svelte";
   import ChevronIcon from "./components/ChevronIcon.svelte";
   import QrModal from "./components/QrModal.svelte";
+  import { t, localizeError, discoveryLabelFor, folderCountLabel } from "./i18n";
 
   interface DeviceInfo {
     id: string; name: string; host: string; address: string;
@@ -229,12 +230,7 @@
   $: sending = !!sendState && (sendState.state === "waiting" || sendState.state === "transferring");
   $: sendPct = sendProgress && sendProgress.total > 0 ? (sendProgress.bytes / sendProgress.total) * 100 : 0;
   $: recvPct = recvProgress && recvProgress.total > 0 ? (recvProgress.bytes / recvProgress.total) * 100 : 0;
-  $: discoveryLabel =
-    peers.length === 0
-      ? "Ищем устройства рядом…"
-      : peers.length === 1
-        ? "1 устройство рядом"
-        : `${peers.length} устройств рядом`;
+  $: discoveryLabel = discoveryLabelFor(peers.length);
   $: chatBadge =
     selected && unread[selected.id]
       ? unread[selected.id]
@@ -282,7 +278,7 @@
   function copyText(t: string) {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(t);
-      copyFeedback = "Скопировано";
+      copyFeedback = t("chat.copied");
       if (copyTimer) clearTimeout(copyTimer);
       copyTimer = setTimeout(() => (copyFeedback = ""), 1600);
     }
@@ -291,7 +287,7 @@
     try {
       await RevealDownloads();
     } catch (e) {
-      stagingError = String(e);
+      stagingError = localizeError(String(e));
     }
   }
   function previewName(f: FileMeta): string {
@@ -321,7 +317,7 @@
       await SendMessage(selected.id, text);
       chatInput = "";
     } catch (e) {
-      chatError = String(e);
+      chatError = localizeError(String(e));
     } finally {
       chatSending = false;
     }
@@ -344,7 +340,7 @@
       });
       selectedFiles = selectedFiles;
     } catch (e) {
-      stagingError = String(e);
+      stagingError = localizeError(String(e));
     }
   }
   function clearStaged() {
@@ -361,12 +357,12 @@
 
   async function doSend() {
     if (!selected || selectedCount === 0 || sending) return;
-    sendState = { direction: "send", state: "waiting", message: "Ожидание подтверждения...", peer: selected.name };
+    sendState = { direction: "send", state: "waiting", message: t("transfer.waitingAccept"), peer: selected.name };
     sendProgress = null;
     try {
       await SendTo(selected.id, selectedList);
     } catch (e) {
-      sendState = { direction: "send", state: "failed", message: String(e), peer: selected.name };
+      sendState = { direction: "send", state: "failed", message: localizeError(String(e)), peer: selected.name };
     }
   }
   function cancelSend() { CancelOutgoing(); }
@@ -384,7 +380,7 @@
     try {
       await StartEngine(iface);
     } catch (e) {
-      startError = String(e);
+      startError = localizeError(String(e));
       starting = false;
       return;
     }
@@ -461,7 +457,7 @@
 >
   {#if view === "device" && dropHover && !sending}
     <div class="drop-overlay" aria-hidden="true">
-      <span class="drop-overlay-text">Отпустите, чтобы добавить файлы</span>
+      <span class="drop-overlay-text">{t("drop.overlay")}</span>
     </div>
   {/if}
   <header class="app-header">
@@ -481,8 +477,8 @@
             <button
               type="button"
               class="btn-qr"
-              title="QR для отправки с телефона"
-              aria-label="Показать QR-код"
+              title={t("qr.btnTitle")}
+              aria-label={t("qr.btnAria")}
               on:click={() => (showQr = true)}
             >
               <svg class="btn-qr-icon" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
@@ -494,7 +490,7 @@
             <PlatformIcon platform={self.platform} size={40} />
             <div class="self-meta">
               <div class="self-name">{self.name}</div>
-              <div class="self-sub">это устройство · {peerEndpoint(self)}</div>
+              <div class="self-sub">{t("devices.thisDevice")} · {peerEndpoint(self)}</div>
             </div>
           </div>
         </div>
@@ -512,7 +508,7 @@
     <div class="transfer-float">
       <TransferPanel
         compact
-        title="{sendState && sendState.state === 'waiting' ? 'Ожидание подтверждения' : 'Отправка'}{sendState ? ` · ${sendState.peer}` : ''}"
+        title="{sendState && sendState.state === 'waiting' ? t('transfer.waitingAccept') : t('transfer.sending')}{sendState ? ` · ${sendState.peer}` : ''}"
         indeterminate={sendState?.state === "waiting"}
         percent={sendPct}
         bytesLabel="{sendProgress ? fmtBytes(sendProgress.bytes) : '0 B'} / {fmtBytes(selectedTotal)}"
@@ -520,33 +516,33 @@
         etaLabel=""
         showEta={false}
       />
-      <button class="btn-danger" on:click={cancelSend}>Отменить</button>
+      <button class="btn-danger" on:click={cancelSend}>{t("transfer.cancel")}</button>
     </div>
   {/if}
 
   {#if view === "grid"}
     <section class="devices scroll-y view-panel">
-      <h2 class="section-title">Устройства <span class="count">{peers.length}</span></h2>
+      <h2 class="section-title">{t("devices.title")} <span class="count">{peers.length}</span></h2>
       {#if peers.length === 0}
         <div class="empty">
           <div class="empty-art" aria-hidden="true">
             <DiscoveryIcon size={56} />
           </div>
-          <p>Ищем устройства Swoop в локальной сети</p>
-          <small>Запустите Swoop на другом устройстве в той же сети — оно появится здесь автоматически.</small>
+          <p>{t("discovery.emptyTitle")}</p>
+          <small>{t("discovery.emptyHint")}</small>
         </div>
       {:else}
         <div class="grid">
           {#each peers as p (p.id)}
             <button
               class="device"
-              title="{isWebPeer(p) ? `${p.name} · ${p.browser || 'Браузер'}` : `${p.name} · ${p.fingerprint}`}"
+              title="{isWebPeer(p) ? `${p.name} · ${p.browser || t('devices.browser')}` : `${p.name} · ${p.fingerprint}`}"
               on:click={() => selectDevice(p)}
             >
               {#if unread[p.id] && !isWebPeer(p)}<span class="badge">{unread[p.id]}</span>{/if}
               <PlatformIcon platform={p.platform} size={48} />
               <div class="device-name">
-                <span class="device-online" title="В сети" aria-hidden="true"></span>
+                <span class="device-online" title={t("devices.online")} aria-hidden="true"></span>
                 <span>{p.name}</span>
               </div>
               <div class="device-host">{peerSubtitle(p)}</div>
@@ -558,9 +554,9 @@
   {:else if view === "device" && selected}
     <section class="card-view view-panel">
       <div class="device-top">
-        <button class="back" on:click={back} aria-label="К устройствам">
+        <button class="back" on:click={back} aria-label={t("devices.backAria")}>
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M15.4 5.4 9.8 11l5.6 5.6-1.8 1.8L6.2 11l7.4-7.4 1.8 1.8z"/></svg>
-          <span>Устройства</span>
+          <span>{t("devices.back")}</span>
         </button>
         <div class="device-top-meta">
           <PlatformIcon platform={selected.platform} size={36} />
@@ -568,9 +564,9 @@
             <div class="device-top-name">{selected.name}</div>
             <div class="device-top-sub">
               {#if isWebPeer(selected)}
-                {selected.browser || "Браузер"} · {peerEndpoint(selected)}
+                {selected.browser || t("devices.browser")} · {peerEndpoint(selected)}
               {:else}
-                отпечаток {shortFp(selected.fingerprint)}
+                {t("devices.fingerprint")} {shortFp(selected.fingerprint)}
               {/if}
             </div>
           </div>
@@ -581,21 +577,21 @@
       <div class="transfer-area">
       {#if sending || (sendProgress && sendState && sendState.state === "transferring")}
         <TransferPanel
-          title={sendState && sendState.state === "waiting" ? "Ожидание подтверждения получателя" : "Отправка"}
+          title={sendState && sendState.state === "waiting" ? t("transfer.waitingPeer") : t("transfer.sending")}
           indeterminate={sendState?.state === "waiting"}
           percent={sendPct}
           largePercent={sendState?.state === "transferring"}
           bytesLabel="{sendProgress ? fmtBytes(sendProgress.bytes) : '0 B'} / {fmtBytes(selectedTotal)}"
           speedLabel={sendProgress ? fmtSpeed(sendProgress.speed) : "\u2014"}
-          etaLabel="осталось {sendProgress ? fmtETA(sendProgress.etaSeconds) : '\u2014'}"
+          etaLabel={t("transfer.etaRemaining", { eta: sendProgress ? fmtETA(sendProgress.etaSeconds) : "\u2014" })}
           showAdvanced={showAdvanced && !!sendProgress}
-          advancedText={sendProgress ? `потоков: ${sendProgress.streams} · ${sendProgress.fileName || '\u2014'} · ${sendPct.toFixed(1)}%` : ""}
+          advancedText={sendProgress ? t("transfer.streams", { streams: sendProgress.streams, file: sendProgress.fileName || "\u2014", pct: sendPct.toFixed(1) }) : ""}
         >
           <div slot="actions" class="panel-actions">
             <button class="link" on:click={() => (showAdvanced = !showAdvanced)}>
-              {showAdvanced ? "Скрыть" : "Подробнее"}
+              {showAdvanced ? t("transfer.hide") : t("transfer.details")}
             </button>
-            <button class="btn-danger" on:click={cancelSend}>Отменить</button>
+            <button class="btn-danger" on:click={cancelSend}>{t("transfer.cancel")}</button>
           </div>
         </TransferPanel>
       {:else}
@@ -606,13 +602,13 @@
         <div class="transfer-scroll scroll-y" class:transfer-scroll-empty={stagingRoots.length === 0}>
           {#if stagingRoots.length === 0}
             <div class="files-empty">
-              <p>Перетащите файлы или папки в это окно</p>
-              <p class="files-empty-hint">или выберите через кнопки внизу</p>
+              <p>{t("drop.emptyTitle")}</p>
+              <p class="files-empty-hint">{t("drop.emptyHint")}</p>
             </div>
           {:else}
             <div class="staged">
               <div class="staged-head">
-                {stagingRoots.length} элемент(ов) · {selectedCount} из {totalFileCount} файл(ов) · {fmtBytes(selectedTotal)}
+                {t("files.stagedSummary", { items: stagingRoots.length, selected: selectedCount, total: totalFileCount, size: fmtBytes(selectedTotal) })}
               </div>
               <div class="staged-list">
                 {#each treeRows as row (row.entry.path)}
@@ -620,7 +616,7 @@
                   {@const check = e.kind === "dir" ? dirCheckState(e) : (selectedFiles[e.path] ? "on" : "off")}
                   <div class="staged-item" style="padding-left:{12 + row.depth * 18}px">
                     {#if e.kind === "dir"}
-                      <button class="tree-toggle" on:click={() => toggleExpanded(e.path)} aria-label={expandedDirs[e.path] ? "Свернуть" : "Развернуть"}>
+                      <button class="tree-toggle" on:click={() => toggleExpanded(e.path)} aria-label={expandedDirs[e.path] ? t("files.collapse") : t("files.expand")}>
                         <ChevronIcon expanded={!!expandedDirs[e.path]} size={22} />
                       </button>
                       <input
@@ -632,7 +628,7 @@
                       />
                       <span class="tree-icon">{"\u{1F4C1}"}</span>
                       <span class="staged-name" title={e.path}>{e.name}</span>
-                      <span class="staged-size">{e.fileCount} файл(ов) · {fmtBytes(e.size)}</span>
+                      <span class="staged-size">{t("files.dirFiles", { count: e.fileCount, size: fmtBytes(e.size) })}</span>
                     {:else}
                       <span class="tree-spacer"></span>
                       <input
@@ -654,11 +650,11 @@
 
         {#if sendState && ["completed", "declined", "failed", "canceled"].includes(sendState.state)}
           <div class="banner banner-{sendState.state}">
-            {#if sendState.state === "completed"}Передача завершена
-            {:else if sendState.state === "declined"}Получатель отклонил передачу
-            {:else if sendState.state === "canceled"}Отменено
-            {:else}Ошибка: {sendState.message}{/if}
-            <span class="banner-hint"> — список сохранён, можно отправить снова</span>
+            {#if sendState.state === "completed"}{t("transfer.completed")}
+            {:else if sendState.state === "declined"}{t("transfer.declined")}
+            {:else if sendState.state === "canceled"}{t("transfer.canceled")}
+            {:else}{t("transfer.failed")}: {localizeError(sendState.message)}{/if}
+            <span class="banner-hint">{t("transfer.listKept")}</span>
           </div>
         {/if}
       {/if}
@@ -668,23 +664,23 @@
         <div class="send-bar">
           <div class="send-bar-summary">
             {#if selectedCount > 0}
-              {selectedCount} файл(ов) · {fmtBytes(selectedTotal)}
+              {t("files.selectedSummary", { count: selectedCount, size: fmtBytes(selectedTotal) })}
             {:else}
-              <span class="send-bar-empty">Выберите файлы для отправки</span>
+              <span class="send-bar-empty">{t("files.noneSelected")}</span>
             {/if}
           </div>
           <div class="send-bar-actions">
-            <button class="btn-secondary" on:click={pickFiles}>Файлы</button>
-            <button class="btn-secondary" on:click={pickFolder}>Папка</button>
+            <button class="btn-secondary" on:click={pickFiles}>{t("files.pick")}</button>
+            <button class="btn-secondary" on:click={pickFolder}>{t("files.folder")}</button>
             <button
               class="btn-secondary btn-clear"
               disabled={stagingRoots.length === 0}
               on:click={clearStaged}
             >
-              Очистить
+              {t("files.clear")}
             </button>
             <button class="btn-primary btn-send" disabled={selectedCount === 0} on:click={doSend}>
-              Отправить{#if selectedCount > 0} ({selectedCount}){/if}
+              {t("files.send")}{#if selectedCount > 0} ({selectedCount}){/if}
             </button>
           </div>
         </div>
@@ -700,25 +696,25 @@
             if (chatExpanded) scrollChatSoon();
           }}
         >
-          <span>Сообщения</span>
+          <span>{t("chat.title")}</span>
           {#if chatBadge > 0}<span class="chat-count">{chatBadge}</span>{/if}
           <span class="chat-chevron"><ChevronIcon expanded={chatExpanded} size={22} /></span>
         </button>
         {#if chatExpanded}
           <div class="chat-list scroll-y" bind:this={chatListEl}>
             {#if chatMessages.length === 0}
-              <div class="chat-empty">Пока пусто. Отправьте ссылку или короткую заметку.</div>
+              <div class="chat-empty">{t("chat.empty")}</div>
             {:else}
               {#each chatMessages as m, i (i)}
                 <div class="chat-msg {m.dir === 'out' ? 'chat-out' : 'chat-in'}">
                   <div class="chat-bubble">
                     <span class="chat-text">{m.text}</span>
-                    <button class="chat-copy" title="Копировать" aria-label="Копировать" on:click={() => copyText(m.text)}>
+                    <button class="chat-copy" title={t("chat.copy")} aria-label={t("chat.copy")} on:click={() => copyText(m.text)}>
                       <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 2h10a2 2 0 012 2v14h-2V4H8V2zm-4 4h10a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2z"/></svg>
                     </button>
                   </div>
                   <div class="chat-time">
-                    {fmtTime(m.ts)}{#if m.dir === "out"} <span class="chat-tick {m.read ? 'read' : ''}" title={m.read ? "Прочитано" : "Доставлено"}>{"\u2713\u2713"}</span>{/if}
+                    {fmtTime(m.ts)}{#if m.dir === "out"} <span class="chat-tick {m.read ? 'read' : ''}" title={m.read ? t("chat.read") : t("chat.delivered")}>{"\u2713\u2713"}</span>{/if}
                   </div>
                 </div>
               {/each}
@@ -727,8 +723,8 @@
           {#if chatError}<div class="chat-error">{chatError}</div>{/if}
           {#if copyFeedback}<div class="chat-toast">{copyFeedback}</div>{/if}
           <form class="chat-input" on:submit|preventDefault={sendMsg}>
-            <input type="text" maxlength="8192" placeholder="Сообщение или ссылка\u2026" bind:value={chatInput} aria-label="Сообщение" />
-            <button class="btn-primary chat-send" type="submit" disabled={chatSending || !chatInput.trim()} aria-label="Отправить">
+            <input type="text" maxlength="8192" placeholder={t("chat.placeholder")} bind:value={chatInput} aria-label={t("chat.messageAria")} />
+            <button class="btn-primary chat-send" type="submit" disabled={chatSending || !chatInput.trim()} aria-label={t("chat.sendAria")}>
               <svg class="chat-send-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
                 <path fill="currentColor" d="M5 4.8v14.4L20.2 12z" />
               </svg>
@@ -741,7 +737,7 @@
 
   {#if started && downloadsPath}
     <footer class="save-footer" title={downloadsPath}>
-      <span class="save-label">Входящие файлы сохраняются в</span>
+      <span class="save-label">{t("footer.downloads")}</span>
       <button class="save-path-btn" on:click={revealDownloads}>{downloadsPath}</button>
     </footer>
   {/if}
@@ -750,15 +746,15 @@
 {#if !started}
   <div class="modal-overlay">
     <div class="modal modal-wide">
-      <h3>Сетевой интерфейс</h3>
-      <p class="modal-sub">Swoop будет искать устройства и принимать файлы через выбранный интерфейс. Выбери тот, что в одной сети с другими устройствами. Сменить интерфейс после запуска нельзя — только перезапустить приложение.</p>
+      <h3>{t("iface.title")}</h3>
+      <p class="modal-sub">{t("iface.sub")}</p>
       <div class="iface-list scroll-y">
         <button class="iface {chosenIface === '' ? 'iface-active' : ''}" on:click={() => saveIfaceChoice("")}>
           <span class="iface-radio" aria-hidden="true"></span>
           <NetIcon kind="auto" />
           <div class="iface-meta">
-            <div class="iface-name">Авто</div>
-            <div class="iface-sub">Выбрать маршрут автоматически</div>
+            <div class="iface-name">{t("iface.auto")}</div>
+            <div class="iface-sub">{t("iface.autoSub")}</div>
           </div>
         </button>
         {#each interfaces as it (it.name)}
@@ -780,7 +776,7 @@
       {/if}
       <div class="modal-actions">
         <button class="btn-primary" disabled={starting} on:click={() => startWith(chosenIface)}>
-          {starting ? "Запуск\u2026" : "Продолжить"}
+          {starting ? t("iface.starting") : t("iface.continue")}
         </button>
       </div>
     </div>
@@ -794,15 +790,15 @@
         <div class="modal-device-icon">
           <PlatformIcon platform={incoming.sender.platform} size={56} />
         </div>
-        <h3>{incoming.sender.name} хочет отправить файлы</h3>
+        <h3>{t("transfer.incomingTitle", { name: incoming.sender.name })}</h3>
         <p class="modal-sub">{peerEndpoint(incoming.sender)}</p>
         <p class="modal-info">
-          {incoming.count} файл(ов) · {fmtBytes(incoming.totalSize)}
-          {#if incoming.looseFiles > 0} · {incoming.looseFiles} без папки{/if}
+          {t("transfer.incomingSummary", { count: incoming.count, size: fmtBytes(incoming.totalSize) })}
+          {#if incoming.looseFiles > 0}{t("transfer.looseFiles", { loose: incoming.looseFiles })}{/if}
         </p>
         {#if incoming.rootDirs && incoming.rootDirs.length > 0}
           <p class="modal-sub root-names">
-            {incoming.rootDirs.length} {incoming.rootDirs.length === 1 ? "папка" : "папок"}:
+            {folderCountLabel(incoming.rootDirs.length)}
             {incoming.rootDirs.map((d) => d.name).join(", ")}
           </p>
         {/if}
@@ -812,16 +808,16 @@
               <li><span class="file-preview-name">{previewName(f)}</span><span class="file-preview-size">{fmtBytes(f.size)}</span></li>
             {/each}
             {#if incomingMore > 0}
-              <li class="file-preview-more">и ещё {incomingMore}…</li>
+              <li class="file-preview-more">{t("transfer.andMore", { n: incomingMore })}</li>
             {/if}
           </ul>
         {/if}
         <div class="modal-actions">
-          <button class="btn-ghost" on:click={decline}>Отклонить</button>
-          <button class="btn-primary" on:click={accept}>Принять</button>
+          <button class="btn-ghost" on:click={decline}>{t("transfer.decline")}</button>
+          <button class="btn-primary" on:click={accept}>{t("transfer.accept")}</button>
         </div>
       {:else if recvState.state === "transferring"}
-        <h3>Приём от {incoming.sender.name}</h3>
+        <h3>{t("transfer.incomingFrom", { name: incoming.sender.name })}</h3>
         <TransferPanel
           title=""
           indeterminate={false}
@@ -829,12 +825,12 @@
           largePercent
           bytesLabel="{recvProgress ? fmtBytes(recvProgress.bytes) : '0 B'} / {fmtBytes(incoming.totalSize)}"
           speedLabel={recvProgress ? fmtSpeed(recvProgress.speed) : "\u2014"}
-          etaLabel="осталось {recvProgress ? fmtETA(recvProgress.etaSeconds) : '\u2014'}"
+          etaLabel={t("transfer.etaRemaining", { eta: recvProgress ? fmtETA(recvProgress.etaSeconds) : "\u2014" })}
           showAdvanced={!!recvProgress}
-          advancedText={recvProgress ? `потоков: ${recvProgress.streams}` : ""}
+          advancedText={recvProgress ? t("transfer.streams", { streams: recvProgress.streams, file: "\u2014", pct: recvPct.toFixed(1) }) : ""}
         />
         <div class="modal-actions">
-          <button class="btn-danger" on:click={cancelRecv}>Отменить</button>
+          <button class="btn-danger" on:click={cancelRecv}>{t("transfer.cancel")}</button>
         </div>
       {:else}
         <div class="modal-result" class:success={recvState.state === "completed"} class:warn={recvState.state !== "completed" && recvState.state !== "canceled"}>
@@ -847,16 +843,16 @@
           </svg>
         </div>
         <h3>
-          {#if recvState.state === "completed"}Файлы получены
-          {:else if recvState.state === "canceled"}Передача отменена
-          {:else}Передача не завершена{/if}
+          {#if recvState.state === "completed"}{t("transfer.filesReceived")}
+          {:else if recvState.state === "canceled"}{t("transfer.canceled")}
+          {:else}{t("transfer.incomplete")}{/if}
         </h3>
-        <p class="modal-sub">{recvState.message}</p>
+        <p class="modal-sub">{localizeError(recvState.message)}</p>
         <div class="modal-actions">
           {#if recvState.state === "completed"}
-            <button class="btn-secondary" on:click={revealDownloads}>Открыть папку</button>
+            <button class="btn-secondary" on:click={revealDownloads}>{t("transfer.openFolder")}</button>
           {/if}
-          <button class="btn-primary" on:click={dismissIncoming}>Закрыть</button>
+          <button class="btn-primary" on:click={dismissIncoming}>{t("common.close")}</button>
         </div>
       {/if}
     </div>

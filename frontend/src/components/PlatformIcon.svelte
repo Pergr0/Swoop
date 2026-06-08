@@ -6,6 +6,7 @@
   import iosIcon from "../assets/os/ios.svg";
   import desktopIcon from "../assets/os/desktop.svg";
   import webIcon from "../assets/os/web.svg";
+  import { t } from "../i18n";
 
   export let platform = "";
   export let size = 40;
@@ -24,10 +25,10 @@
     linux: "Linux",
     android: "Android",
     ios: "iOS",
-    web: "Браузер",
+    web: t("platform.browser"),
   };
   $: src = icons[platform] ?? desktopIcon;
-  $: label = labels[platform] ?? "Устройство";
+  $: label = labels[platform] ?? t("platform.device");
 </script>
 
 <img

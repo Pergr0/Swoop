@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"swoop/core"
+	"swoop/core/i18n"
 	"swoop/core/chat"
 	"swoop/core/netif"
 	"swoop/core/protocol"
@@ -127,7 +128,7 @@ func (a *App) ScanPaths(paths []string) ([]staging.Entry, error) {
 // chosen paths.
 func (a *App) OpenFilePicker() []string {
 	paths, err := wruntime.OpenMultipleFilesDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title: "Выберите файлы для отправки",
+		Title: i18n.Pick("Выберите файлы для отправки", "Choose files to send"),
 	})
 	if err != nil {
 		return nil
@@ -138,7 +139,7 @@ func (a *App) OpenFilePicker() []string {
 // OpenFolderPicker opens a native directory picker and returns the chosen path.
 func (a *App) OpenFolderPicker() string {
 	path, err := wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title: "Выберите папку для отправки",
+		Title: i18n.Pick("Выберите папку для отправки", "Choose folder to send"),
 	})
 	if err != nil {
 		return ""

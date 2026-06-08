@@ -5,6 +5,7 @@
   import tunnelIcon from "../assets/net/tunnel.svg";
   import virtualIcon from "../assets/net/virtual.svg";
   import otherIcon from "../assets/net/other.svg";
+  import { t } from "../i18n";
 
   export let kind = "";
   export let size = 28;
@@ -17,16 +18,16 @@
     virtual: virtualIcon,
     other: otherIcon,
   };
-  const labels: Record<string, string> = {
-    auto: "Авто",
-    wifi: "Wi-Fi",
-    ethernet: "Ethernet",
-    tunnel: "VPN / туннель",
-    virtual: "Виртуальный адаптер",
-    other: "Сеть",
+  const labelKeys: Record<string, "net.auto" | "net.wifi" | "net.ethernet" | "net.tunnel" | "net.virtual" | "net.other"> = {
+    auto: "net.auto",
+    wifi: "net.wifi",
+    ethernet: "net.ethernet",
+    tunnel: "net.tunnel",
+    virtual: "net.virtual",
+    other: "net.other",
   };
   $: src = icons[kind] ?? otherIcon;
-  $: label = labels[kind] ?? "Сеть";
+  $: label = t(labelKeys[kind] ?? "net.other");
 </script>
 
 <img

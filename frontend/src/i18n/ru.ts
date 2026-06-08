@@ -1,0 +1,101 @@
+import type { MessageKey } from "./en";
+
+const ru: Record<MessageKey, string> = {
+  "discovery.searching": "Ищем устройства рядом…",
+  "discovery.oneNearby": "1 устройство рядом",
+  "discovery.manyNearby": "{n} устройств рядом",
+  "discovery.emptyTitle": "Ищем устройства Swoop в локальной сети",
+  "discovery.emptyHint":
+    "Запустите Swoop на другом устройстве в той же сети — оно появится здесь автоматически.",
+
+  "devices.title": "Устройства",
+  "devices.back": "Устройства",
+  "devices.backAria": "К устройствам",
+  "devices.online": "В сети",
+  "devices.thisDevice": "это устройство",
+  "devices.fingerprint": "отпечаток",
+  "devices.browser": "Браузер",
+
+  "drop.overlay": "Отпустите, чтобы добавить файлы",
+  "drop.emptyTitle": "Перетащите файлы или папки в это окно",
+  "drop.emptyHint": "или выберите через кнопки внизу",
+
+  "files.pick": "Файлы",
+  "files.folder": "Папка",
+  "files.clear": "Очистить",
+  "files.send": "Отправить",
+  "files.noneSelected": "Выберите файлы для отправки",
+  "files.stagedSummary": "{items} элемент(ов) · {selected} из {total} файл(ов) · {size}",
+  "files.selectedSummary": "{count} файл(ов) · {size}",
+  "files.dirFiles": "{count} файл(ов) · {size}",
+  "files.collapse": "Свернуть",
+  "files.expand": "Развернуть",
+
+  "transfer.sending": "Отправка",
+  "transfer.receiving": "Приём",
+  "transfer.waitingAccept": "Ожидание подтверждения",
+  "transfer.waitingPeer": "Ожидание подтверждения получателя",
+  "transfer.etaRemaining": "осталось {eta}",
+  "transfer.streams": "потоков: {streams} · {file} · {pct}%",
+  "transfer.cancel": "Отменить",
+  "transfer.details": "Подробнее",
+  "transfer.hide": "Скрыть",
+  "transfer.completed": "Передача завершена",
+  "transfer.declined": "Получатель отклонил передачу",
+  "transfer.canceled": "Отменено",
+  "transfer.failed": "Ошибка",
+  "transfer.listKept": " — список сохранён, можно отправить снова",
+  "transfer.incomingTitle": "{name} хочет отправить файлы",
+  "transfer.incomingFrom": "Приём от {name}",
+  "transfer.filesReceived": "Файлы получены",
+  "transfer.incomplete": "Передача не завершена",
+  "transfer.incomingSummary": "{count} файл(ов) · {size}",
+  "transfer.looseFiles": " · {loose} без папки",
+  "transfer.foldersOne": "{n} папка:",
+  "transfer.foldersMany": "{n} папок:",
+  "transfer.andMore": "и ещё {n}…",
+  "transfer.accept": "Принять",
+  "transfer.decline": "Отклонить",
+  "transfer.openFolder": "Открыть папку",
+
+  "chat.title": "Сообщения",
+  "chat.empty": "Пока пусто. Отправьте ссылку или короткую заметку.",
+  "chat.placeholder": "Сообщение или ссылка…",
+  "chat.messageAria": "Сообщение",
+  "chat.sendAria": "Отправить",
+  "chat.copy": "Копировать",
+  "chat.copied": "Скопировано",
+  "chat.read": "Прочитано",
+  "chat.delivered": "Доставлено",
+
+  "footer.downloads": "Входящие файлы сохраняются в",
+
+  "iface.title": "Сетевой интерфейс",
+  "iface.sub":
+    "Swoop будет искать устройства и принимать файлы через выбранный интерфейс. Выбери тот, что в одной сети с другими устройствами. Сменить интерфейс после запуска нельзя — только перезапустить приложение.",
+  "iface.auto": "Авто",
+  "iface.autoSub": "Выбрать маршрут автоматически",
+  "iface.continue": "Продолжить",
+  "iface.starting": "Запуск…",
+
+  "qr.title": "Отправка с телефона",
+  "qr.sub": "Отсканируйте QR-код камерой телефона (та же Wi‑Fi сеть)",
+  "qr.alt": "QR-код со ссылкой на отправку файлов",
+  "qr.btnTitle": "QR для отправки с телефона",
+  "qr.btnAria": "Показать QR-код",
+  "qr.closeAria": "Закрыть",
+
+  "common.close": "Закрыть",
+
+  "net.auto": "Авто",
+  "net.wifi": "Wi‑Fi",
+  "net.ethernet": "Ethernet",
+  "net.tunnel": "VPN / туннель",
+  "net.virtual": "Виртуальный адаптер",
+  "net.other": "Сеть",
+
+  "platform.browser": "Браузер",
+  "platform.device": "Устройство",
+};
+
+export default ru;

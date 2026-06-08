@@ -10,7 +10,7 @@ Zero-config LAN file transfer (Windows, macOS, Linux). Phones and tablets work v
 
 1. Launch Swoop and pick a network interface (Wi‑Fi / Ethernet).
 2. Click a device tile in the grid.
-3. Drag files into the drop zone (or use the file/folder picker), then **Send**.
+3. Drag files into the window (or use the file/folder picker), then **Send**.
 4. The receiver accepts or declines in the incoming-offer dialog. Files land in
    the OS **Downloads** folder.
 5. Optional: expand **Messages** under the drop zone for short text/links.
@@ -32,6 +32,30 @@ fingerprint shown on both sides (TOFU).
 
 More detail: [docs/MOBILE-WEB.md](docs/MOBILE-WEB.md) · user guide (RU):
 [docs/USAGE.md](docs/USAGE.md)
+
+## Language
+
+The desktop app and the phone browser page use **Russian** when the OS (or
+browser) locale list includes Russian (`ru`, `ru-RU`, …). Any other locale
+gets **English**. There is no in-app language switch.
+
+To preview English on a Russian macOS system, temporarily reorder languages
+(quit Swoop first, restore when done):
+
+```bash
+# save current order
+defaults read -g AppleLanguages
+
+# English first (restart Swoop after)
+defaults write -g AppleLanguages -array "en-US" "ru-RU"
+
+# restore Russian (use your saved values)
+defaults write -g AppleLanguages -array "ru-RU" "en-RU"
+```
+
+On the phone, move **English** above Russian in system language settings and
+reopen the Swoop page in the browser. See [docs/USAGE.md](docs/USAGE.md) (RU)
+for the same steps in Russian.
 
 ## Architecture (short)
 

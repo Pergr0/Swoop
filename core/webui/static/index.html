@@ -1,10 +1,11 @@
 <!DOCTYPE html>
 
-<html lang="ru">
+<html lang="en">
 
 <head>
 
   <meta charset="utf-8" />
+  <script src="i18n.js"></script>
 
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 
@@ -350,6 +351,8 @@
 
   <script>
 
+    const i18n = () => window.SwoopI18n;
+
     const pick = document.getElementById("pick");
 
     const send = document.getElementById("send");
@@ -440,7 +443,7 @@
 
       const res = await fetch("/api/v1/info");
 
-      if (!res.ok) throw new Error("не удалось получить информацию о хосте");
+      if (!res.ok) throw new Error(i18n().t("hostInfoError"));
 
       const info = await res.json();
 
@@ -450,7 +453,7 @@
 
       document.getElementById("hostAddr").textContent = endpoint ? endpoint : "";
 
-      document.getElementById("hostFp").textContent = "Отпечаток " + shortFp(info.fingerprint);
+      document.getElementById("hostFp").textContent = i18n().t("fingerprint") + " " + shortFp(info.fingerprint);
 
       return info;
 
@@ -464,7 +467,7 @@
 
       if (!selected.length) {
 
-        fileList.textContent = "Файлы не выбраны";
+        fileList.textContent = i18n().t("noFiles");
 
         send.disabled = true;
 
@@ -474,7 +477,7 @@
 
       const total = selected.reduce((a, f) => a + f.size, 0);
 
-      fileList.textContent = selected.length + " файл(ов) · " + formatBytes(total);
+      fileList.textContent = i18n().t("filesSummary", { n: selected.length, size: formatBytes(total) });
 
       send.disabled = false;
 
@@ -542,9 +545,9 @@
 
       if (/iPhone|iPad|iPod/i.test(ua)) return "iPhone";
 
-      if (/Android/i.test(ua)) return "Телефон";
+      if (/Android/i.test(ua)) return i18n().t("phone");
 
-      return "Браузер";
+      return i18n().t("browser");
 
     }
 
@@ -602,7 +605,7 @@
         meta.className = "chat-meta";
         let tick = "";
         if (m.dir === "out") {
-          tick = m.read ? ' <span class="chat-tick read" title="Прочитано">✓✓</span>' : ' <span class="chat-tick" title="Доставлено">✓✓</span>';
+          tick = m.read ? ' <span class="chat-tick read" title="' + i18n().t("chatRead") + '">✓✓</span>' : ' <span class="chat-tick" title="' + i18n().t("chatDelivered") + '">✓✓</span>';
         }
         meta.innerHTML = fmtChatTime(m.ts) + tick;
         row.appendChild(bubble);
@@ -726,11 +729,11 @@
 
       pullOffer.hidden = false;
 
-      pullFrom.textContent = (offer.sender && offer.sender.name ? offer.sender.name : "Компьютер") + " хочет отправить файлы";
+      pullFrom.textContent = i18n().t("wantsToSend", { name: (offer.sender && offer.sender.name ? offer.sender.name : i18n().t("computer")) });
 
       const archive = (offer.count || 0) > 1 || (offer.files || []).some((f) => f.relPath && f.relPath.indexOf("/") >= 0);
 
-      pullMeta.textContent = offer.count + " файл(ов) · " + formatBytes(offer.totalSize || 0) + (archive ? " · будет скачан .zip" : "");
+      pullMeta.textContent = i18n().t("filesSummary", { n: offer.count, size: formatBytes(offer.totalSize || 0) }) + (archive ? i18n().t("willDownloadZip") : "");
 
       pullFiles.innerHTML = "";
 
@@ -752,7 +755,7 @@
 
         const li = document.createElement("li");
 
-        li.textContent = "… ещё " + ((offer.files || []).length - 12);
+        li.textContent = i18n().t("andMore", { n: (offer.files || []).length - 12 });
 
         pullFiles.appendChild(li);
 
@@ -852,7 +855,7 @@
 
         : formatBytes(loaded);
 
-      setPullStatus((label || "Скачивание") + " · " + pct + "% · " + sizeLabel);
+      setPullStatus((label || i18n().t("downloading")) + " · " + pct + "% · " + sizeLabel);
 
     }
 
@@ -896,13 +899,13 @@
 
           } else {
 
-            reject(new Error("Ошибка скачивания: HTTP " + xhr.status));
+            reject(new Error(i18n().t("downloadError", { code: xhr.status })));
 
           }
 
         };
 
-        xhr.onerror = () => reject(new Error("Сеть недоступна"));
+        xhr.onerror = () => reject(new Error(i18n().t("networkError")));
 
         xhr.send();
 
@@ -924,13 +927,13 @@
 
         const total = resp.archiveSize || 0;
 
-        const blob = await downloadBlob(resp.archivePath, resp.token, total, "Архив " + name);
+        const blob = await downloadBlob(resp.archivePath, resp.token, total, i18n().t("archivePrefix") + name);
 
         const minSize = total > 0 ? Math.max(32, Math.floor(total * 0.5)) : 32;
 
         if (!blob || blob.size < minSize) {
 
-          throw new Error("архив не получен (пустой ответ)");
+          throw new Error(i18n().t("archiveEmpty"));
 
         }
 
@@ -942,7 +945,7 @@
 
       const files = resp.files || [];
 
-      if (files.length !== 1) throw new Error("неожиданный ответ сервера");
+      if (files.length !== 1) throw new Error(i18n().t("unexpectedResponse"));
 
       const f = files[0];
 
@@ -952,7 +955,7 @@
 
       if (!blob || (f.size > 0 && blob.size < f.size)) {
 
-        throw new Error("файл получен не полностью");
+        throw new Error(i18n().t("incompleteFile"));
 
       }
 
@@ -984,7 +987,7 @@
 
           hidePullOffer();
 
-          setPullStatus("Передача отклонена");
+          setPullStatus(i18n().t("transferDeclined"));
 
           return;
 
@@ -992,7 +995,7 @@
 
         if (res.status === 403) {
 
-          setPullStatus("Отклонено", "err");
+          setPullStatus(i18n().t("declined"), "err");
 
           hidePullOffer();
 
@@ -1002,7 +1005,7 @@
 
         if (!res.ok) {
 
-          setPullStatus("Ошибка: HTTP " + res.status, "err");
+          setPullStatus(i18n().t("errorHttp", { code: res.status }), "err");
 
           hidePullOffer();
 
@@ -1014,7 +1017,7 @@
 
         await downloadPullFiles(resp);
 
-        setPullStatus("Готово! Файлы сохранены.", "ok");
+        setPullStatus(i18n().t("pullDone"), "ok");
 
         pullBarFill.style.width = "100%";
 
@@ -1052,7 +1055,7 @@
 
       barFill.style.width = "0%";
 
-      setStatus("Ожидание подтверждения на компьютере…");
+      setStatus(i18n().t("waitingDesktop"));
 
 
 
@@ -1108,7 +1111,7 @@
 
         if (prep.status === 403) {
 
-          setStatus("Получатель отклонил передачу", "err");
+          setStatus(i18n().t("recipientDeclined"), "err");
 
           send.disabled = false;
 
@@ -1118,7 +1121,7 @@
 
         if (prep.status === 409) {
 
-          setStatus("Компьютер занят другой передачей", "err");
+          setStatus(i18n().t("hostBusy"), "err");
 
           send.disabled = false;
 
@@ -1128,7 +1131,7 @@
 
         if (prep.status === 408) {
 
-          setStatus("Время ожидания истекло", "err");
+          setStatus(i18n().t("timedOut"), "err");
 
           send.disabled = false;
 
@@ -1138,7 +1141,7 @@
 
         if (!prep.ok) {
 
-          setStatus("Ошибка handshake: HTTP " + prep.status, "err");
+          setStatus(i18n().t("handshakeError", { code: prep.status }), "err");
 
           send.disabled = false;
 
@@ -1150,7 +1153,7 @@
 
         if (resp.mode !== "http-upload" || !resp.uploadPath) {
 
-          setStatus("Хост не поддерживает загрузку из браузера", "err");
+          setStatus(i18n().t("noBrowserUpload"), "err");
 
           send.disabled = false;
 
@@ -1160,7 +1163,7 @@
 
 
 
-        setStatus("Загрузка…");
+        setStatus(i18n().t("uploading"));
 
         const fd = new FormData();
 
@@ -1170,7 +1173,7 @@
 
         await uploadWithProgress(resp.uploadPath, resp.token, fd, selected.reduce((a, f) => a + f.size, 0));
 
-        setStatus("Готово! Файлы на компьютере.", "ok");
+        setStatus(i18n().t("uploadDone"), "ok");
 
         barFill.style.width = "100%";
 
@@ -1210,11 +1213,11 @@
 
           if (xhr.status >= 200 && xhr.status < 300) resolve();
 
-          else reject(new Error("Ошибка загрузки: HTTP " + xhr.status));
+          else reject(new Error(i18n().t("uploadError", { code: xhr.status })));
 
         };
 
-        xhr.onerror = () => reject(new Error("Сеть недоступна"));
+        xhr.onerror = () => reject(new Error(i18n().t("networkError")));
 
         xhr.send(body);
 

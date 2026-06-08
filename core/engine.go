@@ -23,6 +23,7 @@ import (
 
 	"swoop/core/chat"
 	"swoop/core/discovery"
+	"swoop/core/i18n"
 	"swoop/core/identity"
 	"swoop/core/netif"
 	"swoop/core/paths"
@@ -227,14 +228,14 @@ func (e *Engine) OnTransferState(fn func(transfer.State)) { e.mgr.SetOnState(fn)
 // SendTo starts an outgoing transfer to the peer with the given id.
 func (e *Engine) SendTo(deviceID string, items []protocol.SendItem) error {
 	if deviceID == e.id.DeviceID {
-		return fmt.Errorf("нельзя отправить файлы самому себе")
+		return i18n.ErrSendToSelf()
 	}
 	peer, ok := e.findPeer(deviceID)
 	if !ok {
-		return fmt.Errorf("устройство не найдено: %s", deviceID)
+		return i18n.ErrDeviceNotFound(deviceID)
 	}
 	if peer.Platform != protocol.PlatformWeb && (peer.Address == "" || peer.ControlPort == 0) {
-		return fmt.Errorf("у устройства %q нет адреса для подключения", peer.Name)
+		return i18n.ErrPeerNoAddress(peer.Name)
 	}
 	return e.mgr.Send(peer, items)
 }
@@ -263,17 +264,17 @@ func (e *Engine) emitChat(m chat.Message) {
 // records it locally on success.
 func (e *Engine) SendMessage(deviceID, text string) error {
 	if strings.TrimSpace(text) == "" {
-		return fmt.Errorf("пустое сообщение")
+		return i18n.ErrEmptyMessage()
 	}
 	if len(text) > protocol.MaxMessageBytes {
-		return fmt.Errorf("сообщение слишком длинное (макс %d байт)", protocol.MaxMessageBytes)
+		return i18n.ErrMessageTooLong(protocol.MaxMessageBytes)
 	}
 	if !utf8.ValidString(text) {
-		return fmt.Errorf("сообщение должно быть корректным UTF-8")
+		return i18n.ErrMessageNotUTF8()
 	}
 	peer, ok := e.findPeer(deviceID)
 	if !ok {
-		return fmt.Errorf("устройство не найдено")
+		return i18n.ErrDeviceNotFoundShort()
 	}
 	ts := time.Now().UnixMilli()
 
@@ -291,10 +292,10 @@ func (e *Engine) SendMessage(deviceID, text string) error {
 	}
 
 	if peer.Fingerprint == "" {
-		return fmt.Errorf("у устройства %q нет отпечатка TLS", peer.Name)
+		return i18n.ErrPeerNoFingerprint(peer.Name)
 	}
 	if peer.Address == "" || peer.ControlPort == 0 {
-		return fmt.Errorf("у устройства %q нет адреса для подключения", peer.Name)
+		return i18n.ErrPeerNoAddress(peer.Name)
 	}
 
 	body, _ := json.Marshal(protocol.ChatMessage{Sender: e.Self(), Text: text, Ts: ts})
@@ -303,12 +304,12 @@ func (e *Engine) SendMessage(deviceID, text string) error {
 	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
 	if err != nil {
 		e.logf("chat send to %s failed: %v", peer.Name, err)
-		return fmt.Errorf("не удалось отправить: %v", err)
+		return i18n.ErrChatSend(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		e.logf("chat send to %s rejected: HTTP %d", peer.Name, resp.StatusCode)
-		return fmt.Errorf("получатель отклонил сообщение (HTTP %d)", resp.StatusCode)
+		return i18n.ErrChatRejected(resp.StatusCode)
 	}
 
 	rec := chat.Message{Ts: ts, PeerID: peer.ID, PeerName: peer.Name, Dir: "out", Text: text}
