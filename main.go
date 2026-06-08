@@ -33,6 +33,7 @@ func main() {
 			ProgramName: "swoop",
 		},
 		OnStartup:        app.startup,
+		OnBeforeClose:    app.beforeClose,
 		OnShutdown:       app.shutdown,
 		DragAndDrop: &options.DragAndDrop{
 			EnableFileDrop: true,

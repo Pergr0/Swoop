@@ -692,7 +692,7 @@ func (m *Manager) runSendWebPull(sess *sendSession) {
 
 
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(m.transferCtx())
 
 	sess.setHTTPCancel(cancel)
 
@@ -732,11 +732,15 @@ func (m *Manager) runSendWebPull(sess *sendSession) {
 
 	case <-ctx.Done():
 
+		msg := "Приложение закрывается"
+
 		if sess.canceled() {
 
-			m.emitState(State{Direction: DirSend, State: "canceled", Message: "Отменено", Peer: peer.Name})
+			msg = "Отменено"
 
 		}
+
+		m.emitState(State{Direction: DirSend, State: "canceled", Message: msg, Peer: peer.Name})
 
 		return
 

@@ -36,6 +36,12 @@ type Discoverer struct {
 	only *net.Interface // when set, announce/listen only on this interface
 
 	sendMu sync.Mutex
+
+	// Set during Start; used by Goodbye before the socket is closed.
+	connMu sync.Mutex
+	pconn  *ipv4.PacketConn
+	ifaces []net.Interface
+	dst    *net.UDPAddr
 }
 
 // SetInterface restricts discovery to a single interface. Must be called before
@@ -86,6 +92,12 @@ func (d *Discoverer) Start(ctx context.Context) error {
 		_ = pconn.JoinGroup(nil, &net.UDPAddr{IP: group})
 	}
 
+	d.connMu.Lock()
+	d.pconn = pconn
+	d.ifaces = ifaces
+	d.dst = dst
+	d.connMu.Unlock()
+
 	go d.readLoop(ctx, pconn)
 	go d.announceLoop(ctx, pconn, ifaces, dst)
 	go d.reapLoop(ctx)
@@ -95,6 +107,26 @@ func (d *Discoverer) Start(ctx context.Context) error {
 		_ = pconn.Close()
 	}()
 	return nil
+}
+
+// Goodbye sends a multicast farewell so peers drop this device immediately.
+// Safe to call before cancelling the discovery context.
+func (d *Discoverer) Goodbye() {
+	d.connMu.Lock()
+	pconn := d.pconn
+	ifaces := append([]net.Interface(nil), d.ifaces...)
+	dst := d.dst
+	d.connMu.Unlock()
+	if pconn == nil || dst == nil {
+		return
+	}
+	goodbye := d.self
+	goodbye.Gone = true
+	payload, err := json.Marshal(goodbye)
+	if err != nil {
+		return
+	}
+	d.broadcast(pconn, ifaces, dst, payload)
 }
 
 func (d *Discoverer) announceLoop(ctx context.Context, pconn *ipv4.PacketConn, ifaces []net.Interface, dst *net.UDPAddr) {
@@ -145,7 +177,14 @@ func (d *Discoverer) readLoop(ctx context.Context, pconn *ipv4.PacketConn) {
 		if err := json.Unmarshal(buf[:n], &info); err != nil {
 			continue
 		}
-		if info.ID == "" || info.ID == d.self.ID || info.Fingerprint == "" {
+		if info.ID == "" || info.ID == d.self.ID {
+			continue
+		}
+		if info.Gone {
+			d.removePeer(info.ID)
+			continue
+		}
+		if info.Fingerprint == "" {
 			continue
 		}
 		// Prefer the address the peer advertises (it reflects the interface it
@@ -160,6 +199,18 @@ func (d *Discoverer) readLoop(ctx context.Context, pconn *ipv4.PacketConn) {
 		}
 		d.upsert(info)
 	}
+}
+
+func (d *Discoverer) removePeer(id string) {
+	d.mu.Lock()
+	if _, ok := d.peers[id]; !ok {
+		d.mu.Unlock()
+		return
+	}
+	delete(d.peers, id)
+	d.order = removeID(d.order, id)
+	d.mu.Unlock()
+	d.emit()
 }
 
 func (d *Discoverer) upsert(info protocol.DeviceInfo) {

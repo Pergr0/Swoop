@@ -146,7 +146,12 @@ func (s *Server) Start(ctx context.Context, port int) error {
 
 	go func() {
 		<-ctx.Done()
-		_ = s.http.Close()
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.http.Shutdown(shutCtx); err != nil {
+			s.logf("control server shutdown: %v", err)
+			_ = s.http.Close()
+		}
 	}()
 	go func() {
 		// Certs come from TLSConfig, so the file arguments are empty.

@@ -24,6 +24,18 @@ func TestPeerOrderFirstSeen(t *testing.T) {
 	}
 }
 
+func TestGoodbyeRemovesPeer(t *testing.T) {
+	d := New(protocol.DeviceInfo{ID: "self"})
+	d.upsert(protocol.DeviceInfo{ID: "mac", Name: "MacBook", Fingerprint: "sha256:abc"})
+	if len(d.Peers()) != 1 {
+		t.Fatalf("len=%d", len(d.Peers()))
+	}
+	d.removePeer("mac")
+	if len(d.Peers()) != 0 {
+		t.Fatalf("after goodbye len=%d", len(d.Peers()))
+	}
+}
+
 func TestPeerRejoinAppended(t *testing.T) {
 	d := New(protocol.DeviceInfo{ID: "self"})
 	d.upsert(protocol.DeviceInfo{ID: "a", Name: "A"})

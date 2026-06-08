@@ -70,7 +70,16 @@ func (a *App) startup(ctx context.Context) {
 	// (see StartEngine).
 }
 
-// shutdown is the Wails OnShutdown hook; it removes the temporary chat log.
+// beforeClose runs while the window is still up. It cancels transfers and stops
+// networking before WebView2/WebKit teardown to avoid shutdown hangs.
+func (a *App) beforeClose(_ context.Context) (prevent bool) {
+	if a.engine != nil {
+		a.engine.Close()
+	}
+	return false
+}
+
+// shutdown is the Wails OnShutdown hook; idempotent after beforeClose.
 func (a *App) shutdown(_ context.Context) {
 	if a.engine != nil {
 		a.engine.Close()
@@ -157,6 +166,14 @@ func (a *App) CancelIncoming() {
 	if a.engine != nil {
 		a.engine.CancelIncoming()
 	}
+}
+
+// LogPath returns the primary engine log file path (for support / debugging).
+func (a *App) LogPath() string {
+	if a.engine == nil {
+		return ""
+	}
+	return a.engine.LogPath()
 }
 
 // DownloadsPath returns the folder where received files are saved.

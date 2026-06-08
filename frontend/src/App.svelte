@@ -87,6 +87,33 @@
   let chatListEl: HTMLDivElement | null = null;
   let chatExpanded = false;
   let dropHover = false;
+  let dragDepth = 0;
+
+  function canWindowDrop(): boolean {
+    return view === "device" && !sending;
+  }
+  function onDragEnter(e: DragEvent) {
+    if (!canWindowDrop()) return;
+    e.preventDefault();
+    dragDepth++;
+    dropHover = true;
+  }
+  function onDragLeave(e: DragEvent) {
+    if (!canWindowDrop()) return;
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) dropHover = false;
+  }
+  function onDragOver(e: DragEvent) {
+    if (!canWindowDrop()) return;
+    e.preventDefault();
+  }
+  function onDragDrop(e: DragEvent) {
+    if (!canWindowDrop()) return;
+    e.preventDefault();
+    dragDepth = 0;
+    dropHover = false;
+  }
   let unread: Record<string, number> = {};
   let copyFeedback = "";
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -239,7 +266,12 @@
       MarkRead(peerId).catch(() => {});
     }
   }
-  function back() { view = "grid"; chatMessages = []; }
+  function back() {
+    view = "grid";
+    chatMessages = [];
+    dragDepth = 0;
+    dropHover = false;
+  }
 
   function scrollChatSoon() {
     setTimeout(() => { if (chatListEl) chatListEl.scrollTop = chatListEl.scrollHeight; }, 0);
@@ -418,7 +450,20 @@
 
 <svelte:window on:keydown={onKeydown} />
 
-<main class="app-main">
+<main
+  class="app-main"
+  class:window-drop={view === "device" && !sending}
+  class:drop-active={dropHover}
+  on:dragenter={onDragEnter}
+  on:dragleave={onDragLeave}
+  on:dragover={onDragOver}
+  on:drop={onDragDrop}
+>
+  {#if view === "device" && dropHover && !sending}
+    <div class="drop-overlay" aria-hidden="true">
+      <span class="drop-overlay-text">Отпустите, чтобы добавить файлы</span>
+    </div>
+  {/if}
   <header class="app-header">
     <div class="brand">
       <SwoopLogo size={34} />
@@ -554,43 +599,17 @@
           </div>
         </TransferPanel>
       {:else}
-        <div
-          class="dropzone"
-          class:dropzone-hover={dropHover}
-          role="region"
-          aria-label="Перетащите файлы или папки для отправки"
-          on:dragenter|preventDefault={() => (dropHover = true)}
-          on:dragleave|preventDefault={() => (dropHover = false)}
-          on:dragover|preventDefault
-          on:drop|preventDefault={() => (dropHover = false)}
-        >
-          <div class="dropzone-icon" aria-hidden="true">
-            <svg viewBox="0 0 48 48" width="48" height="48">
-              <circle cx="24" cy="24" r="17" fill="none" stroke="currentColor" stroke-width="2" />
-              <path
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M24 30V18M18 24l6-6 6 6"
-              />
-            </svg>
-          </div>
-          <p class="dropzone-title">Перетащите файлы или папки сюда</p>
-          <p class="dropzone-sub">или выберите на этом устройстве</p>
-          <div class="pick-actions">
-            <button class="btn-secondary" on:click={pickFiles}>Выбрать файлы</button>
-            <button class="btn-secondary" on:click={pickFolder}>Выбрать папку</button>
-          </div>
-        </div>
-
         {#if stagingError}
           <div class="banner banner-failed">{stagingError}</div>
         {/if}
 
-        {#if stagingRoots.length > 0}
-          <div class="transfer-scroll scroll-y">
+        <div class="transfer-scroll scroll-y" class:transfer-scroll-empty={stagingRoots.length === 0}>
+          {#if stagingRoots.length === 0}
+            <div class="files-empty">
+              <p>Перетащите файлы или папки в это окно</p>
+              <p class="files-empty-hint">или выберите через кнопки внизу</p>
+            </div>
+          {:else}
             <div class="staged">
               <div class="staged-head">
                 {stagingRoots.length} элемент(ов) · {selectedCount} из {totalFileCount} файл(ов) · {fmtBytes(selectedTotal)}
@@ -630,8 +649,8 @@
                 {/each}
               </div>
             </div>
-          </div>
-        {/if}
+          {/if}
+        </div>
 
         {#if sendState && ["completed", "declined", "failed", "canceled"].includes(sendState.state)}
           <div class="banner banner-{sendState.state}">
@@ -655,6 +674,8 @@
             {/if}
           </div>
           <div class="send-bar-actions">
+            <button class="btn-secondary" on:click={pickFiles}>Файлы</button>
+            <button class="btn-secondary" on:click={pickFolder}>Папка</button>
             <button
               class="btn-secondary btn-clear"
               disabled={stagingRoots.length === 0}
@@ -844,12 +865,40 @@
 
 <style>
   .app-main {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100vh;
     width: 100%;
     padding: var(--space-5) var(--space-6) var(--space-3);
     overflow: hidden;
+  }
+  .app-main.window-drop {
+    --wails-drop-target: drop;
+  }
+  .app-main.window-drop.drop-active,
+  .app-main.window-drop:global(.wails-drop-target-active) {
+    outline: 2px dashed var(--color-accent);
+    outline-offset: -4px;
+  }
+  .drop-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 20, 27, 0.55);
+    pointer-events: none;
+  }
+  .drop-overlay-text {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    color: var(--color-accent-muted);
+    padding: var(--space-4) var(--space-6);
+    border: 2px dashed var(--color-accent);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface-raised);
   }
 
   @keyframes view-in {
@@ -1063,6 +1112,29 @@
   .transfer-scroll {
     flex: 1;
     min-height: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+  }
+  .transfer-scroll-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .files-empty {
+    text-align: center;
+    padding: var(--space-6);
+    color: var(--color-text-faint);
+  }
+  .files-empty p {
+    margin: 0;
+    font-size: var(--text-md);
+    color: var(--color-text-secondary);
+  }
+  .files-empty-hint {
+    margin-top: var(--space-2) !important;
+    font-size: var(--text-sm) !important;
+    color: var(--color-text-faint) !important;
   }
   .send-bar {
     flex-shrink: 0;
@@ -1077,21 +1149,6 @@
   }
   .send-bar-summary { flex: 1; min-width: 0; font-size: var(--text-base); color: var(--color-text-secondary); }
   .send-bar-empty { color: var(--color-text-faint); }
-  .dropzone {
-    width: 100%;
-    border: 1px dashed var(--color-border-strong); border-radius: var(--radius-lg);
-    padding: var(--space-6) var(--space-5); text-align: center; color: var(--color-text-muted);
-    transition: border-color var(--transition-fast), background var(--transition-fast);
-    --wails-drop-target: drop; flex-shrink: 0;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-  }
-  .dropzone-hover, .dropzone:global(.wails-drop-target-active) {
-    border-color: var(--color-accent); background: var(--color-surface-raised); color: var(--color-text-secondary);
-  }
-  .dropzone-icon { color: var(--color-accent); margin-bottom: var(--space-2); }
-  .dropzone-title { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-secondary); }
-  .dropzone-sub { margin: var(--space-2) 0 var(--space-4); font-size: var(--text-sm); }
-  .pick-actions { display: flex; gap: var(--space-3); justify-content: center; flex-wrap: wrap; }
 
   .send-bar-actions {
     display: flex;
@@ -1102,7 +1159,7 @@
   .btn-clear { min-width: 112px; padding: 12px 18px; }
   .btn-send { min-width: 168px; padding: 12px 22px; }
 
-  .staged { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); }
+  .staged { padding: var(--space-3) var(--space-4); }
   .staged-head { font-size: var(--text-sm); color: var(--color-text-secondary); margin-bottom: var(--space-2); }
   .staged-list { display: flex; flex-direction: column; gap: var(--space-1); }
   .staged-item {

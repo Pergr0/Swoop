@@ -77,6 +77,9 @@ type DeviceInfo struct {
 	Version     int      `json:"version"`
 	// Capabilities lists supported data-plane modes (e.g. tcp-push, http-upload).
 	Capabilities []string `json:"capabilities,omitempty"`
+	// Gone signals that the device is shutting down. Peers should remove it from
+	// their grid immediately instead of waiting for announce TTL expiry.
+	Gone bool `json:"gone,omitempty"`
 	// Browser is set for platform web clients (parsed from User-Agent).
 	Browser string `json:"browser,omitempty"`
 }

@@ -123,3 +123,16 @@ rm -rf frontend/node_modules && bash scripts/build.sh
 
 **Phone cannot connect** — same Wi‑Fi, accept the HTTPS certificate warning,
 allow port **53317** through the desktop firewall.
+
+**Diagnostics log** — the engine writes `swoop.log` under the app data folder
+(same place as device identity):
+
+| OS | Path |
+|----|------|
+| Windows | `%APPDATA%\Swoop\swoop.log` |
+| macOS | `~/Library/Application Support/Swoop/swoop.log` |
+| Linux | `~/.config/Swoop/swoop.log` |
+
+When running from a writable build directory, a copy may also appear next to the
+binary. The first log line records the exact path (`logging to …`). See also
+[docs/USAGE.md](docs/USAGE.md) (Russian).

@@ -51,6 +51,8 @@ type Engine struct {
 	mgr          *transfer.Manager
 	downloadsDir string
 	logger       *log.Logger
+	logPath      string
+	logFile      *os.File
 
 	boundIP string         // advertised IPv4 (chosen interface, or auto)
 	iface   *net.Interface // chosen interface; nil = auto (all interfaces)
@@ -71,6 +73,8 @@ type Engine struct {
 	onPeers func([]protocol.DeviceInfo)
 	onChat  func(chat.Message)
 	onRead  func(peerID string, upToTs int64)
+
+	closeOnce sync.Once
 }
 
 // New constructs an engine without starting any network activity.
@@ -91,7 +95,8 @@ func New(cfg Config) (*Engine, error) {
 	if dl == "" {
 		dl = paths.Downloads()
 	}
-	e := &Engine{id: id, downloadsDir: dl, logger: newLogger()}
+	lg, logPath, logFile := newLogger(cfg.DataDir)
+	e := &Engine{id: id, downloadsDir: dl, logger: lg, logPath: logPath, logFile: logFile}
 	e.mgr = transfer.NewManager(e.Self, dl)
 	e.mgr.SetLogf(e.logf)
 
@@ -112,8 +117,18 @@ func New(cfg Config) (*Engine, error) {
 }
 
 // Close stops networking and releases engine resources. It removes the
-// temporary chat log so no message history survives the app.
+// temporary chat log so no message history survives the app. Safe to call
+// more than once (e.g. OnBeforeClose and OnShutdown).
 func (e *Engine) Close() {
+	e.closeOnce.Do(e.shutdown)
+}
+
+func (e *Engine) shutdown() {
+	e.logf("engine shutting down")
+	e.mgr.Shutdown()
+	if e.disco != nil {
+		e.disco.Goodbye()
+	}
 	if e.runCancel != nil {
 		e.runCancel()
 		e.runCancel = nil
@@ -124,7 +139,17 @@ func (e *Engine) Close() {
 			e.logf("chat store close: %v", err)
 		}
 	}
+	if e.logFile != nil {
+		if err := e.logFile.Close(); err != nil {
+			e.logf("log file close: %v", err)
+		}
+		e.logFile = nil
+	}
+	e.logf("engine shutdown complete")
 }
+
+// LogPath returns the primary log file path (empty if logging fell back to stderr).
+func (e *Engine) LogPath() string { return e.logPath }
 
 // binaryDir returns the directory of the running executable (falling back to
 // the working directory), used for files that should sit next to the binary.
@@ -138,18 +163,41 @@ func binaryDir() string {
 	return "."
 }
 
-// newLogger writes swoop.log next to the executable (and mirrors to stderr), so
-// it can be found reliably regardless of how the GUI app was launched. Falls
-// back to the working directory if the executable path is unavailable.
-func newLogger() *log.Logger {
-	var w io.Writer = os.Stderr
-	path := filepath.Join(binaryDir(), "swoop.log")
-	if f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
-		w = io.MultiWriter(os.Stderr, f)
+// newLogger writes swoop.log under dataDir (always writable on packaged apps).
+// When the install directory is writable it also mirrors to swoop.log next to
+// the binary for local dev builds.
+func newLogger(dataDir string) (*log.Logger, string, *os.File) {
+	_ = os.MkdirAll(dataDir, 0o755)
+	primary := filepath.Join(dataDir, "swoop.log")
+
+	var writers []io.Writer
+	var primaryFile *os.File
+	if f, err := os.OpenFile(primary, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+		primaryFile = f
+		writers = append(writers, f)
 	}
+
+	binPath := filepath.Join(binaryDir(), "swoop.log")
+	if binPath != primary {
+		if f, err := os.OpenFile(binPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			writers = append(writers, f)
+		}
+	}
+
+	logPath := primary
+	if len(writers) == 0 {
+		writers = append(writers, os.Stderr)
+		logPath = ""
+	}
+
+	w := io.MultiWriter(writers...)
 	lg := log.New(w, "", log.LstdFlags|log.Lmicroseconds)
-	lg.Printf("logging to %s", path)
-	return lg
+	if logPath != "" {
+		lg.Printf("logging to %s (binary dir: %s)", logPath, binaryDir())
+	} else {
+		lg.Printf("logging to stderr only (could not open %s)", primary)
+	}
+	return lg, logPath, primaryFile
 }
 
 func (e *Engine) logf(format string, args ...any) {
@@ -591,6 +639,7 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
+	e.mgr.SetRunContext(runCtx)
 
 	if err := e.mgr.StartDataPlane(runCtx); err != nil {
 		runCancel()

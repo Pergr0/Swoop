@@ -92,6 +92,7 @@ type Manager struct {
 	downloadsDir string
 
 	dataPort int
+	runCtx   context.Context
 
 	mu       sync.Mutex
 	outgoing *sendSession
@@ -131,6 +132,24 @@ func (m *Manager) SetLogf(fn func(string, ...any)) {
 	if fn != nil {
 		m.logf = fn
 	}
+}
+
+// SetRunContext ties transfer goroutines to the engine lifecycle.
+func (m *Manager) SetRunContext(ctx context.Context) {
+	m.runCtx = ctx
+}
+
+func (m *Manager) transferCtx() context.Context {
+	if m.runCtx != nil {
+		return m.runCtx
+	}
+	return context.Background()
+}
+
+// Shutdown cancels active transfers and declines any pending incoming offer.
+func (m *Manager) Shutdown() {
+	m.CancelOutgoing()
+	m.CancelIncoming()
 }
 
 // DataPort returns the bound data-plane port (0 until StartDataPlane).
@@ -283,6 +302,10 @@ func (m *Manager) PrepareUpload(req protocol.PrepareUploadRequest, remoteAddr st
 		m.clearIncoming(sess)
 		m.emitState(State{Direction: DirRecv, State: "failed", Message: "Время ожидания истекло", Peer: req.Sender.Name})
 		return protocol.PrepareUploadResponse{}, http.StatusRequestTimeout // 408
+	case <-m.transferCtx().Done():
+		m.clearIncoming(sess)
+		m.emitState(State{Direction: DirRecv, State: "canceled", Message: "Приложение закрывается", Peer: req.Sender.Name})
+		return protocol.PrepareUploadResponse{}, http.StatusServiceUnavailable // 503
 	}
 
 	if err := m.prepareDestFiles(sess); err != nil {
@@ -335,12 +358,19 @@ func (m *Manager) RespondIncoming(accept bool) {
 	}
 }
 
-// CancelIncoming aborts the active incoming transfer, if any.
+// CancelIncoming aborts the active incoming transfer or declines a pending offer.
 func (m *Manager) CancelIncoming() {
 	m.mu.Lock()
 	sess := m.incoming
 	m.mu.Unlock()
-	if sess == nil || sess.token == "" {
+	if sess == nil {
+		return
+	}
+	if sess.token == "" {
+		select {
+		case sess.decision <- false:
+		default:
+		}
 		return
 	}
 	atomic.StoreInt32(&sess.cancel, 1)
@@ -656,13 +686,13 @@ func (m *Manager) runSend(sess *sendSession) {
 	m.logf("send to %s (%s:%d): %d file(s), %d bytes", peer.Name, peer.Address, peer.ControlPort, len(sess.files), sess.total)
 	m.emitState(State{Direction: DirSend, State: "waiting", Message: "Ожидание подтверждения...", Peer: peer.Name})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(m.transferCtx())
 	sess.setHTTPCancel(cancel)
 	defer cancel()
 
 	resp, status, err := m.postPrepare(ctx, peer, sess.files)
 	if err != nil {
-		if sess.canceled() {
+		if sess.canceled() || errors.Is(err, context.Canceled) {
 			m.logf("send to %s canceled while waiting", peer.Name)
 			m.emitState(State{Direction: DirSend, State: "canceled", Message: "Отменено", Peer: peer.Name})
 		} else {
