@@ -819,7 +819,11 @@ func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punch
 		e.logf("rendezvous register: %v", err)
 		return
 	}
-	e.logf("rendezvous: session registered (signaling only)")
+	if reach == nil {
+		e.logf("rendezvous: session registered (signaling only); no UPnP reach — importer must reach your public IP on TCP %d", e.server.Port())
+	} else {
+		e.logf("rendezvous: session registered (signaling only)")
+	}
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -924,7 +928,7 @@ func (e *Engine) probePairedPeer(id string) {
 	}
 	if hasInv && inv.PunchPort > 0 {
 		if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID, punchConn); err != nil {
-			e.logf("paired peer %q punch: %v", peer.Name, err)
+			e.logf("paired peer %q punch: %v (host UDP %d must be reachable; inviter must keep invite open)", peer.Name, err, inv.PunchPort)
 		}
 	}
 	live, err := pairing.ProbeInfo(ctx, peer)
@@ -957,8 +961,16 @@ func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer pro
 		return inv, peer, nil
 	}
 	e.logf("rendezvous: joined session, host reflexive %s (local punch UDP %d)", host.ReflexiveAddr, punchPort)
+	if host.ReachAddr == "" && host.ReflexiveAddr == rendezvous.DefaultServerHost {
+		e.logf("rendezvous: warning: host reflexive equals rendezvous server — VPN or same host? TCP to %s:%d may not reach Swoop on the inviter", host.ReflexiveAddr, host.ControlPort)
+	}
 	inv = rendezvous.ApplyHostInfo(inv, host)
 	peer = inv.DialDevice()
+	if inv.HasReach() {
+		e.logf("paired peer %q: probing reach %s:%d punch host UDP %d", peer.Name, inv.ReachAddr, inv.ReachPort, inv.PunchPort)
+	} else {
+		e.logf("paired peer %q: no UPnP reach — probing reflexive %s:%d punch host UDP %d (needs router port-forward on inviter)", peer.Name, peer.Address, peer.ControlPort, inv.PunchPort)
+	}
 	peer.Paired = true
 	peer.PairStatus = pairing.StatusConnecting
 	e.paired.UpdateInvite(id, inv, peer)
