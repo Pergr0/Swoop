@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 
 	"swoop/core"
-	"swoop/core/i18n"
 	"swoop/core/chat"
+	"swoop/core/i18n"
+	"swoop/core/invite"
 	"swoop/core/netif"
 	"swoop/core/protocol"
 	"swoop/core/staging"
@@ -226,6 +227,121 @@ func (a *App) MarkRead(deviceID string) {
 	if a.engine != nil {
 		a.engine.MarkRead(deviceID)
 	}
+}
+
+// ImportInviteResult is a verified SwoopInvite ready for pairing.
+type ImportInviteResult struct {
+	Device    protocol.DeviceInfo `json:"device"`
+	ShortCode string              `json:"shortCode"`
+	ExpiresAt int64               `json:"expiresAt"`
+}
+
+// GenerateInvite creates a signed SwoopInvite blob (internet pairing).
+func (a *App) GenerateInvite() (invite.Bundle, error) {
+	if a.engine == nil {
+		return invite.Bundle{}, fmt.Errorf("%s", i18n.Pick("Swoop не запущен", "Swoop is not running"))
+	}
+	return a.engine.GenerateInvite()
+}
+
+// SaveInviteFile writes a .swoopinvite file via the native save dialog.
+func (a *App) SaveInviteFile() (string, error) {
+	if a.engine == nil {
+		return "", fmt.Errorf("%s", i18n.Pick("Swoop не запущен", "Swoop is not running"))
+	}
+	bundle, err := a.engine.GenerateInvite()
+	if err != nil {
+		return "", err
+	}
+	return a.saveInviteBundle(bundle)
+}
+
+// SaveInviteBundle writes the given invite bundle to a .swoopinvite file (native save dialog).
+func (a *App) SaveInviteBundle(bundle invite.Bundle) (string, error) {
+	if bundle.Blob == "" {
+		return "", fmt.Errorf("%s", i18n.Pick("Некорректное приглашение", "Invalid invite"))
+	}
+	return a.saveInviteBundle(bundle)
+}
+
+func (a *App) saveInviteBundle(bundle invite.Bundle) (string, error) {
+	name := "swoop-invite.swoopinvite"
+	if bundle.ShortCode != "" {
+		name = fmt.Sprintf("swoop-invite-%s.swoopinvite", bundle.ShortCode)
+	}
+	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+		Title: i18n.Pick("Сохранить приглашение Swoop", "Save Swoop invite"),
+		Filters: []wruntime.FileFilter{
+			{DisplayName: i18n.Pick("Приглашение Swoop", "Swoop invite"), Pattern: "*.swoopinvite"},
+		},
+		DefaultFilename: name,
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(invite.FileContent(bundle)), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// SaveInvitePNG writes an invite card PNG via the native save dialog.
+func (a *App) SaveInvitePNG() (string, error) {
+	if a.engine == nil {
+		return "", fmt.Errorf("%s", i18n.Pick("Swoop не запущен", "Swoop is not running"))
+	}
+	bundle, err := a.engine.GenerateInvite()
+	if err != nil {
+		return "", err
+	}
+	pngData, err := invite.RenderPNG(bundle)
+	if err != nil {
+		return "", err
+	}
+	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
+		Title: i18n.Pick("Сохранить карточку приглашения", "Save invite card"),
+		Filters: []wruntime.FileFilter{
+			{DisplayName: "PNG", Pattern: "*.png"},
+		},
+		DefaultFilename: "swoop-invite.png",
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	if err := os.WriteFile(path, pngData, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// ImportInviteFile opens a native file picker and verifies a SwoopInvite (.swoopinvite or PNG).
+func (a *App) ImportInviteFile() (ImportInviteResult, error) {
+	if a.engine == nil {
+		return ImportInviteResult{}, fmt.Errorf("%s", i18n.Pick("Swoop не запущен", "Swoop is not running"))
+	}
+	path, err := wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title: i18n.Pick("Импорт приглашения Swoop", "Import Swoop invite"),
+		Filters: []wruntime.FileFilter{
+			{DisplayName: i18n.Pick("Приглашение Swoop", "Swoop invite"), Pattern: "*.swoopinvite;*.png"},
+			{DisplayName: "PNG", Pattern: "*.png"},
+		},
+	})
+	if err != nil || path == "" {
+		return ImportInviteResult{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ImportInviteResult{}, err
+	}
+	parsed, err := a.engine.ImportInviteBytes(data)
+	if err != nil {
+		return ImportInviteResult{}, err
+	}
+	return ImportInviteResult{
+		Device:    parsed.Device,
+		ShortCode: parsed.ShortCode,
+		ExpiresAt: parsed.ExpiresAt,
+	}, nil
 }
 
 func appDataDir() string {

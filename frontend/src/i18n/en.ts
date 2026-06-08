@@ -87,6 +87,22 @@ const en = {
   "qr.btnAria": "Show QR code to connect a mobile device",
   "qr.closeAria": "Close",
 
+  "invite.modalTitle": "Connect a device over the internet",
+  "invite.modalHint":
+    "On the other device, scan this QR in Swoop or import the invite file.",
+  "invite.download": "Download",
+  "invite.loading": "Creating invite…",
+  "invite.qrAlt": "QR code for internet device pairing",
+  "invite.closeAria": "Close",
+  "invite.internetBtnTitle": "Connect over the internet",
+  "invite.internetBtnAria": "Create internet connection invite",
+  "invite.importBtn": "Import invite",
+  "invite.importBtnTitle": "Import invite",
+  "invite.importBtnAria": "Import Swoop invite from file or image",
+  "invite.importOk": "Invite from {name} · code {code}",
+  "invite.expired": "Invite has expired",
+  "invite.invalid": "Invalid invite file",
+
   "common.close": "Close",
 
   "net.auto": "Auto",

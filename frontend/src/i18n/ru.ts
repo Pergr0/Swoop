@@ -89,6 +89,22 @@ const ru: Record<MessageKey, string> = {
   "qr.btnAria": "Показать QR для подключения мобильного устройства",
   "qr.closeAria": "Закрыть",
 
+  "invite.modalTitle": "Подключение устройства в Интернет",
+  "invite.modalHint":
+    "На втором устройстве отсканируйте QR в Swoop или импортируйте файл приглашения.",
+  "invite.download": "Скачать",
+  "invite.loading": "Создание приглашения…",
+  "invite.qrAlt": "QR-код для подключения устройства через интернет",
+  "invite.closeAria": "Закрыть",
+  "invite.internetBtnTitle": "Подключение через интернет",
+  "invite.internetBtnAria": "Создать приглашение для подключения через интернет",
+  "invite.importBtn": "Импорт приглашения",
+  "invite.importBtnTitle": "Импорт приглашения",
+  "invite.importBtnAria": "Импорт приглашения Swoop из файла или картинки",
+  "invite.importOk": "Приглашение от {name} · код {code}",
+  "invite.expired": "Срок приглашения истёк",
+  "invite.invalid": "Некорректный файл приглашения",
+
   "common.close": "Закрыть",
 
   "net.auto": "Авто",

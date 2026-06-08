@@ -17,6 +17,9 @@
     SendMessage,
     ChatHistory,
     MarkRead,
+    GenerateInvite,
+    SaveInviteBundle,
+    ImportInviteFile,
   } from "../wailsjs/go/main/App.js";
   import { EventsOn, OnFileDrop, OnFileDropOff } from "../wailsjs/runtime/runtime.js";
   import SwoopLogo from "./components/SwoopLogo.svelte";
@@ -26,7 +29,11 @@
   import TransferPanel from "./components/TransferPanel.svelte";
   import ChevronIcon from "./components/ChevronIcon.svelte";
   import QrModal from "./components/QrModal.svelte";
+  import InviteModal from "./components/InviteModal.svelte";
   import QrCodeImage from "./components/QrCodeImage.svelte";
+  import IconButton from "./components/IconButton.svelte";
+  import GlobeIcon from "./components/GlobeIcon.svelte";
+  import ImportIcon from "./components/ImportIcon.svelte";
   import { t, localizeError, discoveryLabelFor, folderCountLabel } from "./i18n";
 
   interface DeviceInfo {
@@ -133,6 +140,10 @@
   let copyFeedback = "";
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
   let showQr = false;
+  let internetInvite: { blob: string; shortCode: string; expiresAt: number; deviceName: string } | null = null;
+  let showInviteModal = false;
+  let inviteModalLoading = false;
+  let inviteFeedback = "";
 
   const IFACE_KEY = "swoop-iface";
 
@@ -383,6 +394,51 @@
       copyTimer = setTimeout(() => (copyFeedback = ""), 1600);
     }
   }
+  async function prepareInternetInvite() {
+    if (!started) return;
+    inviteFeedback = "";
+    showInviteModal = true;
+    inviteModalLoading = true;
+    internetInvite = null;
+    try {
+      internetInvite = (await GenerateInvite()) as typeof internetInvite;
+    } catch (e) {
+      internetInvite = null;
+      showInviteModal = false;
+      inviteFeedback = localizeError(String(e));
+    } finally {
+      inviteModalLoading = false;
+    }
+  }
+  function closeInviteModal() {
+    showInviteModal = false;
+    internetInvite = null;
+  }
+  async function downloadInviteFile() {
+    if (!internetInvite) return;
+    try {
+      await SaveInviteBundle(internetInvite);
+    } catch (e) {
+      const msg = String(e);
+      if (msg) inviteFeedback = localizeError(msg);
+    }
+  }
+  async function importInvite() {
+    if (!started) return;
+    inviteFeedback = "";
+    try {
+      const res = (await ImportInviteFile()) as { device: DeviceInfo; shortCode: string };
+      if (!res?.device) return;
+      inviteFeedback = t("invite.importOk", { name: res.device.name, code: res.shortCode });
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("expired") || msg.includes("истёк")) {
+        inviteFeedback = t("invite.expired");
+      } else if (msg) {
+        inviteFeedback = localizeError(msg);
+      }
+    }
+  }
   async function revealDownloads() {
     try {
       await RevealDownloads();
@@ -581,18 +637,25 @@
     <div class="header-end">
       {#if self}
         <div class="header-self">
+          {#if started}
+            <IconButton
+              title={t("invite.internetBtnTitle")}
+              ariaLabel={t("invite.internetBtnAria")}
+              on:click={prepareInternetInvite}
+            >
+              <GlobeIcon />
+            </IconButton>
+          {/if}
           {#if started && webUploadURL(self)}
-            <button
-              type="button"
-              class="btn-qr btn-surface"
+            <IconButton
               title={t("qr.btnTitle")}
-              aria-label={t("qr.btnAria")}
+              ariaLabel={t("qr.btnAria")}
               on:click={() => (showQr = true)}
             >
-              <svg class="btn-qr-icon" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+              <svg class="qr-glyph" viewBox="0 0 24 24" aria-hidden="true">
                 <path fill="currentColor" d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm13-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm2 2h2v2h-2v-2zm-2 2h2v2h-2v-2zm2 2h2v2h-2v-2zM13 17h2v2h-2v-2zm2-4h2v2h-2v-2z"/>
               </svg>
-            </button>
+            </IconButton>
           {/if}
           <div class="self-card">
             <PlatformIcon platform={self.platform} size={40} />
@@ -610,6 +673,14 @@
     open={showQr}
     url={self ? webUploadURL(self) : ""}
     onClose={() => (showQr = false)}
+  />
+
+  <InviteModal
+    open={showInviteModal}
+    bundle={internetInvite}
+    loading={inviteModalLoading}
+    onClose={closeInviteModal}
+    onDownload={downloadInviteFile}
   />
 
   {#if sending && view === "grid"}
@@ -630,7 +701,24 @@
 
   {#if view === "grid"}
     <section class="devices scroll-y view-panel">
-      <h2 class="section-title">{t("devices.title")} <span class="count">{peers.length}</span></h2>
+      <div class="devices-header">
+        {#if started}
+          <button
+            type="button"
+            class="btn-secondary btn-with-icon"
+            title={t("invite.importBtnTitle")}
+            aria-label={t("invite.importBtnAria")}
+            on:click={importInvite}
+          >
+            <ImportIcon size={32} />
+            <span>{t("invite.importBtn")}</span>
+          </button>
+        {/if}
+        <h2 class="section-title">{t("devices.title")} <span class="count">{peers.length}</span></h2>
+      </div>
+      {#if inviteFeedback}
+        <p class="invite-feedback">{inviteFeedback}</p>
+      {/if}
       {#if peers.length === 0}
         <div class="empty">
           <div class="empty-foreground">
@@ -1067,11 +1155,9 @@
     max-width: 100%;
   }
   .header-self {
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: auto max-content;
-    gap: var(--space-3);
+    display: flex;
     align-items: stretch;
+    gap: var(--space-2);
     min-width: 0;
     max-width: 100%;
   }
@@ -1088,18 +1174,21 @@
     color: var(--color-accent);
     background: var(--color-surface-raised);
   }
-  .btn-qr {
+  .devices-header {
     display: flex;
     align-items: center;
-    justify-content: center;
-    box-sizing: border-box;
-    height: 100%;
-    aspect-ratio: 1;
-    width: auto;
-    padding: 0;
+    gap: var(--space-3);
   }
-  .btn-qr-icon { display: block; }
-  .btn-back {
+  .devices-header .section-title {
+    margin: 0;
+  }
+  .invite-feedback {
+    margin: var(--space-2) 0 var(--space-3);
+    font-size: var(--text-sm);
+    color: var(--color-success-text);
+  }
+  .btn-back,
+  .btn-with-icon {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);

@@ -6,14 +6,17 @@
   export let alt = "";
   /** Softer contrast for inline/ambient display; still scannable. */
   export let muted = false;
+  export let ecLevel: "L" | "M" | "Q" | "H" | undefined = undefined;
+  /** Quiet zone in modules (ISO recommends ≥4 for print/screen). */
+  export let margin = 2;
 
   let dataUrl = "";
 
   $: if (url) {
     QRCode.toDataURL(url, {
       width: size,
-      margin: 2,
-      errorCorrectionLevel: muted ? "H" : "M",
+      margin,
+      errorCorrectionLevel: ecLevel ?? (muted ? "H" : "M"),
       color: muted
         ? { dark: "#6f8298ff", light: "#0f141bff" }
         : { dark: "#e8edf5ff", light: "#171d27ff" },

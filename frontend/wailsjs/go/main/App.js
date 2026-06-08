@@ -18,6 +18,14 @@ export function DownloadsPath() {
   return window['go']['main']['App']['DownloadsPath']();
 }
 
+export function GenerateInvite() {
+  return window['go']['main']['App']['GenerateInvite']();
+}
+
+export function ImportInviteFile() {
+  return window['go']['main']['App']['ImportInviteFile']();
+}
+
 export function Interfaces() {
   return window['go']['main']['App']['Interfaces']();
 }
@@ -44,6 +52,18 @@ export function RespondIncoming(arg1) {
 
 export function RevealDownloads() {
   return window['go']['main']['App']['RevealDownloads']();
+}
+
+export function SaveInviteBundle(arg1) {
+  return window['go']['main']['App']['SaveInviteBundle'](arg1);
+}
+
+export function SaveInviteFile() {
+  return window['go']['main']['App']['SaveInviteFile']();
+}
+
+export function SaveInvitePNG() {
+  return window['go']['main']['App']['SaveInvitePNG']();
 }
 
 export function ScanPaths(arg1) {

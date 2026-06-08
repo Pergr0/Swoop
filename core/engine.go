@@ -25,6 +25,7 @@ import (
 	"swoop/core/discovery"
 	"swoop/core/i18n"
 	"swoop/core/identity"
+	"swoop/core/invite"
 	"swoop/core/netif"
 	"swoop/core/paths"
 	"swoop/core/protocol"
@@ -710,6 +711,29 @@ func (e *Engine) Peers() []protocol.DeviceInfo {
 		out = append(out, e.webPresence.Peers()...)
 	}
 	return out
+}
+
+// GenerateInvite creates a signed SwoopInvite blob for internet pairing.
+func (e *Engine) GenerateInvite() (invite.Bundle, error) {
+	if !e.started {
+		return invite.Bundle{}, fmt.Errorf("%s", i18n.Pick("Сначала запустите Swoop", "Start Swoop first"))
+	}
+	return invite.Create(e.id, e.Self(), 0)
+}
+
+// ImportInviteBytes parses a .swoopinvite file or invite PNG.
+func (e *Engine) ImportInviteBytes(data []byte) (invite.Parsed, error) {
+	var blob string
+	if len(data) >= 8 && string(data[:8]) == "\x89PNG\r\n\x1a\n" {
+		b, err := invite.DecodeFromPNG(data)
+		if err != nil {
+			return invite.Parsed{}, err
+		}
+		blob = b
+	} else {
+		blob = invite.BlobFromFile(data)
+	}
+	return invite.ParseAndVerify(blob)
 }
 
 func currentPlatform() protocol.Platform {
