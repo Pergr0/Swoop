@@ -132,6 +132,8 @@ export namespace protocol {
 	    capabilities?: string[];
 	    gone?: boolean;
 	    browser?: string;
+	    paired?: boolean;
+	    pairStatus?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeviceInfo(source);
@@ -150,6 +152,8 @@ export namespace protocol {
 	        this.capabilities = source["capabilities"];
 	        this.gone = source["gone"];
 	        this.browser = source["browser"];
+	        this.paired = source["paired"];
+	        this.pairStatus = source["pairStatus"];
 	    }
 	}
 	export class SendItem {

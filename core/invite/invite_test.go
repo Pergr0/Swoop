@@ -23,7 +23,7 @@ func TestCreateParseRoundTrip(t *testing.T) {
 		Platform:    protocol.PlatformLinux,
 		Version:     protocol.Version,
 	}
-	bundle, err := Create(id, self, time.Hour)
+	bundle, err := Create(id, self, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestPNGTextRoundTrip(t *testing.T) {
 		ControlPort: 53317, Fingerprint: id.Fingerprint,
 		Platform: protocol.PlatformMacOS, Version: protocol.Version,
 	}
-	bundle, err := Create(id, self, time.Hour)
+	bundle, err := Create(id, self, time.Hour, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +67,35 @@ func TestPNGTextRoundTrip(t *testing.T) {
 	}
 	if blob != bundle.Blob {
 		t.Fatalf("blob mismatch after PNG decode")
+	}
+}
+
+func TestReachRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	id, err := identity.LoadOrCreate(dir, "ReachDevice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	self := protocol.DeviceInfo{
+		ID: id.DeviceID, Name: id.Name, Address: "192.168.0.5",
+		ControlPort: 53317, Fingerprint: id.Fingerprint,
+		Platform: protocol.PlatformLinux, Version: protocol.Version,
+	}
+	reach := &Reach{Addr: "203.0.113.10", ControlPort: 53317, PunchPort: 54444}
+	bundle, err := Create(id, self, time.Hour, reach)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseAndVerify(bundle.Blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !parsed.HasReach() || parsed.ReachAddr != reach.Addr || parsed.PunchPort != reach.PunchPort {
+		t.Fatalf("reach mismatch: %+v", parsed)
+	}
+	dial := parsed.DialDevice()
+	if dial.Address != reach.Addr {
+		t.Fatalf("dial address %q", dial.Address)
 	}
 }
 

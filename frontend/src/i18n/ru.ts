@@ -101,7 +101,11 @@ const ru: Record<MessageKey, string> = {
   "invite.importBtn": "Импорт приглашения",
   "invite.importBtnTitle": "Импорт приглашения",
   "invite.importBtnAria": "Импорт приглашения Swoop из файла или картинки",
-  "invite.importOk": "Приглашение от {name} · код {code}",
+  "invite.importOk": "Устройство {name} добавлено · код {code}",
+  "invite.pairedLabel": "Приглашение",
+  "invite.statusConnecting": "Подключение",
+  "invite.statusConnected": "Подключено",
+  "invite.statusError": "Ошибка подключения",
   "invite.expired": "Срок приглашения истёк",
   "invite.invalid": "Некорректный файл приглашения",
 

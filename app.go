@@ -337,6 +337,9 @@ func (a *App) ImportInviteFile() (ImportInviteResult, error) {
 	if err != nil {
 		return ImportInviteResult{}, err
 	}
+	if err := a.engine.PairFromInvite(parsed); err != nil {
+		return ImportInviteResult{}, err
+	}
 	return ImportInviteResult{
 		Device:    parsed.Device,
 		ShortCode: parsed.ShortCode,

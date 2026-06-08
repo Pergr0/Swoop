@@ -82,6 +82,10 @@ type DeviceInfo struct {
 	Gone bool `json:"gone,omitempty"`
 	// Browser is set for platform web clients (parsed from User-Agent).
 	Browser string `json:"browser,omitempty"`
+	// Paired is true when the peer was added via a verified SwoopInvite.
+	Paired bool `json:"paired,omitempty"`
+	// PairStatus is set for invite-paired peers: connecting, connected, error.
+	PairStatus string `json:"pairStatus,omitempty"`
 }
 
 // PresenceRequest is sent by a browser client to appear in the desktop grid.

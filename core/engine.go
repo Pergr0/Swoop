@@ -26,7 +26,9 @@ import (
 	"swoop/core/i18n"
 	"swoop/core/identity"
 	"swoop/core/invite"
+	"swoop/core/nat"
 	"swoop/core/netif"
+	"swoop/core/pairing"
 	"swoop/core/paths"
 	"swoop/core/protocol"
 	"swoop/core/transfer"
@@ -48,6 +50,7 @@ type Config struct {
 type Engine struct {
 	id           *identity.Identity
 	disco        *discovery.Discoverer
+	paired       *pairing.Registry
 	webPresence  *webpresence.Registry
 	server       *transport.Server
 	mgr          *transfer.Manager
@@ -75,6 +78,11 @@ type Engine struct {
 	onPeers func([]protocol.DeviceInfo)
 	onChat  func(chat.Message)
 	onRead  func(peerID string, upToTs int64)
+
+	inviteHostMu     sync.Mutex
+	inviteHostCancel context.CancelFunc
+	inviteNATRelease func()
+	invitePunchConn  *net.UDPConn
 
 	closeOnce sync.Once
 }
@@ -127,6 +135,7 @@ func (e *Engine) Close() {
 
 func (e *Engine) shutdown() {
 	e.logf("engine shutting down")
+	e.stopInviteHost()
 	e.mgr.Shutdown()
 	if e.disco != nil {
 		e.disco.Goodbye()
@@ -672,13 +681,17 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 	e.logf("control plane listening on :%d (advertise IP %s)", e.server.Port(), e.boundIP)
 
 	e.disco = discovery.New(e.Self())
+	e.paired = pairing.New()
 	if e.iface != nil {
 		e.disco.SetInterface(e.iface)
 	}
 	if e.onPeers != nil {
 		e.disco.OnChange(func([]protocol.DeviceInfo) { e.emitPeers() })
+		e.paired.OnChange(func([]protocol.DeviceInfo) { e.emitPeers() })
 		e.webPresence.OnChange(func([]protocol.DeviceInfo) { e.emitPeers() })
 	}
+	e.paired.OnProbe(e.probePairedPeer)
+	go e.paired.Start(runCtx)
 	go e.webPresence.Start(runCtx)
 	if err := e.disco.Start(runCtx); err != nil {
 		runCancel()
@@ -701,24 +714,168 @@ func (e *Engine) emitPeers() {
 	e.onPeers(e.Peers())
 }
 
-// Peers returns LAN-discovered peers followed by connected browser clients.
+// Peers returns LAN-discovered peers, invite-paired peers, then browser clients.
 func (e *Engine) Peers() []protocol.DeviceInfo {
+	seen := make(map[string]bool)
 	var out []protocol.DeviceInfo
 	if e.disco != nil {
-		out = append(out, e.disco.Peers()...)
+		for _, p := range e.disco.Peers() {
+			out = append(out, p)
+			seen[p.ID] = true
+		}
+	}
+	if e.paired != nil {
+		for _, p := range e.paired.Peers() {
+			if !seen[p.ID] {
+				out = append(out, p)
+				seen[p.ID] = true
+			}
+		}
 	}
 	if e.webPresence != nil {
-		out = append(out, e.webPresence.Peers()...)
+		for _, p := range e.webPresence.Peers() {
+			if !seen[p.ID] {
+				out = append(out, p)
+			}
+		}
 	}
 	return out
 }
 
 // GenerateInvite creates a signed SwoopInvite blob for internet pairing.
+// Starts a local UDP punch listener and, when possible, maps ports via UPnP (no remote servers).
 func (e *Engine) GenerateInvite() (invite.Bundle, error) {
 	if !e.started {
 		return invite.Bundle{}, fmt.Errorf("%s", i18n.Pick("Сначала запустите Swoop", "Start Swoop first"))
 	}
-	return invite.Create(e.id, e.Self(), 0)
+	e.stopInviteHost()
+
+	punchConn, punchPort, err := pairing.ListenPunchUDP()
+	if err != nil {
+		return invite.Bundle{}, err
+	}
+
+	var reach *invite.Reach
+	var natRelease func()
+	if m, ok := nat.TryMapPorts(context.Background(), e.server.Port(), e.mgr.DataPort(), punchPort, e.logf); ok {
+		reach = &invite.Reach{
+			Addr:        m.ExternalIP,
+			ControlPort: m.ExternalControl,
+			PunchPort:   m.ExternalPunch,
+		}
+		natRelease = m.Release
+	}
+
+	bundle, err := invite.Create(e.id, e.Self(), 0, reach)
+	if err != nil {
+		punchConn.Close()
+		if natRelease != nil {
+			natRelease()
+		}
+		return invite.Bundle{}, err
+	}
+
+	hostCtx, cancel := context.WithCancel(context.Background())
+	e.inviteHostMu.Lock()
+	e.inviteHostCancel = cancel
+	e.inviteNATRelease = natRelease
+	e.invitePunchConn = punchConn
+	e.inviteHostMu.Unlock()
+
+	go pairing.RunPunchHost(hostCtx, punchConn, bundle.SessionID, e.logf)
+	go e.expireInviteHost(bundle.ExpiresAt)
+
+	if reach != nil {
+		e.logf("internet invite: public %s:%d punch UDP %d", reach.Addr, reach.ControlPort, reach.PunchPort)
+	} else {
+		e.logf("internet invite: no UPnP — LAN punch only (UDP %d)", punchPort)
+	}
+	return bundle, nil
+}
+
+func (e *Engine) stopInviteHost() {
+	e.inviteHostMu.Lock()
+	cancel := e.inviteHostCancel
+	conn := e.invitePunchConn
+	release := e.inviteNATRelease
+	e.inviteHostCancel = nil
+	e.invitePunchConn = nil
+	e.inviteNATRelease = nil
+	e.inviteHostMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if release != nil {
+		release()
+	}
+}
+
+func (e *Engine) expireInviteHost(expiresAt int64) {
+	if expiresAt <= 0 {
+		return
+	}
+	wait := time.Until(time.Unix(expiresAt, 0))
+	if wait <= 0 {
+		e.stopInviteHost()
+		return
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	<-t.C
+	e.stopInviteHost()
+}
+
+// PairFromInvite registers a verified invite peer and probes reachability.
+func (e *Engine) PairFromInvite(parsed invite.Parsed) error {
+	if !e.started || e.paired == nil {
+		return fmt.Errorf("%s", i18n.Pick("Сначала запустите Swoop", "Start Swoop first"))
+	}
+	if time.Now().Unix() > parsed.ExpiresAt {
+		return invite.ErrExpired
+	}
+	if parsed.Device.ID == e.id.DeviceID {
+		return i18n.ErrPairSelf()
+	}
+	dev := parsed.DialDevice()
+	if len(dev.Capabilities) == 0 {
+		dev.Capabilities = []string{
+			protocol.CapTCPPush,
+			protocol.CapHTTPUpload,
+			protocol.CapHTTPPull,
+		}
+	}
+	e.paired.Add(dev, parsed)
+	e.emitPeers()
+	return nil
+}
+
+func (e *Engine) probePairedPeer(id string) {
+	if e.paired == nil {
+		return
+	}
+	peer, ok := e.paired.Get(id)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	if inv, ok := e.paired.InviteMeta(id); ok && inv.PunchPort > 0 {
+		if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID); err != nil {
+			e.logf("paired peer %q punch: %v", peer.Name, err)
+		}
+	}
+	live, err := pairing.ProbeInfo(ctx, peer)
+	if err != nil {
+		e.logf("paired peer %q probe failed: %v", peer.Name, err)
+		e.paired.SetStatus(id, pairing.StatusError)
+		e.emitPeers()
+		return
+	}
+	e.paired.Update(id, live)
+	e.emitPeers()
 }
 
 // ImportInviteBytes parses a .swoopinvite file or invite PNG.

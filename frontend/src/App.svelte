@@ -40,6 +40,8 @@
     id: string; name: string; host: string; address: string;
     platform: string; controlPort: number; fingerprint: string; version: number;
     browser?: string;
+    paired?: boolean;
+    pairStatus?: string;
   }
   interface NetInterface {
     name: string;
@@ -158,7 +160,32 @@
   function peerSubtitle(p: DeviceInfo): string {
     const ep = peerEndpoint(p);
     if (p.platform === "web" && p.browser) return `${ep} · ${p.browser}`;
+    if (p.paired) {
+      const st = pairedStatusLabel(p);
+      return st ? `${ep} · ${st}` : `${ep} · ${t("invite.pairedLabel")}`;
+    }
     return ep;
+  }
+  function pairedStatusLabel(p: DeviceInfo): string {
+    switch (p.pairStatus) {
+      case "connecting": return t("invite.statusConnecting");
+      case "connected": return t("invite.statusConnected");
+      case "error": return t("invite.statusError");
+      default: return "";
+    }
+  }
+  function pairedDotClass(p: DeviceInfo): string {
+    if (!p.paired) return "";
+    switch (p.pairStatus) {
+      case "connecting": return "device-connecting";
+      case "error": return "device-error";
+      default: return "";
+    }
+  }
+  function pairedDotTitle(p: DeviceInfo): string {
+    if (!p.paired) return t("devices.online");
+    const label = pairedStatusLabel(p);
+    return label || t("devices.online");
   }
   function isWebPeer(p: DeviceInfo): boolean {
     return p.platform === "web";
@@ -757,7 +784,13 @@
               {/if}
               <PlatformIcon platform={p.platform} size={48} />
               <div class="device-name">
-                <span class="device-online" title={t("devices.online")} aria-hidden="true"></span>
+                <span
+                  class="device-online"
+                  class:device-connecting={pairedDotClass(p) === "device-connecting"}
+                  class:device-error={pairedDotClass(p) === "device-error"}
+                  title={pairedDotTitle(p)}
+                  aria-hidden="true"
+                ></span>
                 <span>{p.name}</span>
               </div>
               <div class="device-host">{peerSubtitle(p)}</div>
@@ -1377,6 +1410,19 @@
     background: var(--color-success);
     box-shadow: 0 0 8px rgba(61, 220, 132, 0.55);
     flex-shrink: 0;
+  }
+  .device-online.device-connecting {
+    background: var(--color-warning, #e6a23c);
+    box-shadow: 0 0 8px rgba(230, 162, 60, 0.45);
+    animation: dot-pulse 1.4s ease-in-out infinite;
+  }
+  .device-online.device-error {
+    background: var(--color-danger);
+    box-shadow: 0 0 8px rgba(232, 93, 93, 0.45);
+  }
+  @keyframes dot-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
   }
   .device-host {
     font-family: var(--font-mono);

@@ -9,6 +9,13 @@ func ErrSendToSelf() error {
 	))
 }
 
+func ErrPairSelf() error {
+	return fmt.Errorf("%s", Pick(
+		"нельзя подключиться к своему приглашению",
+		"cannot pair with your own invite",
+	))
+}
+
 func ErrDeviceNotFound(id string) error {
 	return fmt.Errorf("%s: %s", Pick("устройство не найдено", "device not found"), id)
 }

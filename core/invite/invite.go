@@ -30,6 +30,14 @@ type Bundle struct {
 	ShortCode  string `json:"shortCode"`
 	ExpiresAt  int64  `json:"expiresAt"`
 	DeviceName string `json:"deviceName"`
+	SessionID  string `json:"sessionId"`
+}
+
+// Reach carries optional public endpoints discovered via local UPnP (no remote servers).
+type Reach struct {
+	Addr        string `json:"addr"`
+	ControlPort int    `json:"controlPort"`
+	PunchPort   int    `json:"punchPort"`
 }
 
 // Parsed is a verified invite ready for pairing (connection step is separate).
@@ -38,6 +46,24 @@ type Parsed struct {
 	ShortCode string              `json:"shortCode"`
 	ExpiresAt int64               `json:"expiresAt"`
 	SessionID string              `json:"sessionId"`
+	ReachAddr string              `json:"reachAddr,omitempty"`
+	ReachPort int                 `json:"reachPort,omitempty"`
+	PunchPort int                 `json:"punchPort,omitempty"`
+}
+
+// HasReach reports whether the invite advertises a routable control endpoint.
+func (p Parsed) HasReach() bool {
+	return p.ReachAddr != "" && p.ReachPort > 0
+}
+
+// DialDevice returns device info using the public reach address when present.
+func (p Parsed) DialDevice() protocol.DeviceInfo {
+	d := p.Device
+	if p.HasReach() {
+		d.Address = p.ReachAddr
+		d.ControlPort = p.ReachPort
+	}
+	return d
 }
 
 type payload struct {
@@ -51,6 +77,9 @@ type payload struct {
 	F   string `json:"f"`
 	Pl  string `json:"pl"`
 	C   string `json:"c"` // base64url DER of signer cert (for signature verify)
+	Ra  string `json:"ra,omitempty"` // reach/public IPv4
+	Rp  int    `json:"rp,omitempty"` // mapped control port
+	Pu  int    `json:"pu,omitempty"` // UDP punch port
 }
 
 type document struct {
@@ -65,7 +94,8 @@ var (
 )
 
 // Create builds a signed invite for the given device identity and advertised self info.
-func Create(id *identity.Identity, self protocol.DeviceInfo, ttl time.Duration) (Bundle, error) {
+// reach is optional public endpoints from local UPnP (internet pairing).
+func Create(id *identity.Identity, self protocol.DeviceInfo, ttl time.Duration, reach *Reach) (Bundle, error) {
 	if id == nil || len(id.Certificate.Certificate) == 0 {
 		return Bundle{}, ErrInvalid
 	}
@@ -91,6 +121,11 @@ func Create(id *identity.Identity, self protocol.DeviceInfo, ttl time.Duration) 
 		Pl:  string(self.Platform),
 		C:   base64.RawURLEncoding.EncodeToString(id.Certificate.Certificate[0]),
 	}
+	if reach != nil {
+		p.Ra = reach.Addr
+		p.Rp = reach.ControlPort
+		p.Pu = reach.PunchPort
+	}
 	sig, err := signPayload(id, p)
 	if err != nil {
 		return Bundle{}, err
@@ -106,6 +141,7 @@ func Create(id *identity.Identity, self protocol.DeviceInfo, ttl time.Duration) 
 		ShortCode:  shortCodeFromSession(sid),
 		ExpiresAt:  exp,
 		DeviceName: self.Name,
+		SessionID:  sid,
 	}, nil
 }
 
@@ -153,6 +189,9 @@ func ParseAndVerify(blob string) (Parsed, error) {
 		ShortCode: shortCodeFromSession(doc.P.Sid),
 		ExpiresAt: doc.P.Exp,
 		SessionID: doc.P.Sid,
+		ReachAddr: doc.P.Ra,
+		ReachPort: doc.P.Rp,
+		PunchPort: doc.P.Pu,
 	}, nil
 }
 

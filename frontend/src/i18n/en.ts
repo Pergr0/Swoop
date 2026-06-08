@@ -99,7 +99,11 @@ const en = {
   "invite.importBtn": "Import invite",
   "invite.importBtnTitle": "Import invite",
   "invite.importBtnAria": "Import Swoop invite from file or image",
-  "invite.importOk": "Invite from {name} · code {code}",
+  "invite.importOk": "Device {name} added · code {code}",
+  "invite.pairedLabel": "Invite",
+  "invite.statusConnecting": "Connecting",
+  "invite.statusConnected": "Connected",
+  "invite.statusError": "Connection error",
   "invite.expired": "Invite has expired",
   "invite.invalid": "Invalid invite file",
 
