@@ -65,7 +65,9 @@ func RunPunchHost(ctx context.Context, conn *net.UDPConn, sessionID string, logf
 }
 
 // ClientPunch sends UDP hellos to the inviter's punch port (public + LAN fallback).
-func ClientPunch(ctx context.Context, parsed invite.Parsed, localPeerID string) error {
+// When boundConn is non-nil it must already be bound to parsed.PunchPort (the port
+// registered with rendezvous) so the host reverse-punch reaches the same socket.
+func ClientPunch(ctx context.Context, parsed invite.Parsed, localPeerID string, boundConn *net.UDPConn) error {
 	if parsed.PunchPort <= 0 || parsed.SessionID == "" {
 		return nil
 	}
@@ -81,11 +83,15 @@ func ClientPunch(ctx context.Context, parsed invite.Parsed, localPeerID string) 
 	if err != nil {
 		return err
 	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
-	if err != nil {
-		return err
+	conn := boundConn
+	if conn == nil {
+		var listenErr error
+		conn, listenErr = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+		if listenErr != nil {
+			return listenErr
+		}
+		defer conn.Close()
 	}
-	defer conn.Close()
 
 	deadline, ok := ctx.Deadline()
 	if !ok {

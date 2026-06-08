@@ -29,7 +29,7 @@ func TestPunchRoundTrip(t *testing.T) {
 	}
 	punchCtx, punchCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer punchCancel()
-	if err := ClientPunch(punchCtx, parsed, "importer-1"); err != nil {
+	if err := ClientPunch(punchCtx, parsed, "importer-1", nil); err != nil {
 		t.Fatal(err)
 	}
 }

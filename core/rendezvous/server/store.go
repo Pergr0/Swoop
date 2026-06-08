@@ -61,7 +61,8 @@ func (s *Store) RegisterHost(sessionID, peerID, deviceName, lanAddr, reachAddr, 
 		},
 	}
 	if s.logf != nil {
-		s.logf("event=host_register session=%s peer=%s reflexive=%s punch=%d", sessionID, peerID, reflexiveIP, punchPort)
+		s.logf("event=host_register session=%s peer=%s reflexive=%s punch=%d reach=%s control=%d",
+			sessionID, peerID, reflexiveIP, punchPort, reachAddr, controlPort)
 	}
 }
 
@@ -78,7 +79,8 @@ func (s *Store) Join(sessionID, peerID, lanAddr, reflexiveIP string, punchPort i
 		reflexiveIP: reflexiveIP, joinedAt: time.Now(),
 	}
 	if s.logf != nil {
-		s.logf("event=join session=%s host=%s joiner=%s joiner_reflexive=%s", sessionID, r.host.peerID, peerID, reflexiveIP)
+		s.logf("event=join session=%s host=%s joiner=%s joiner_reflexive=%s joiner_punch=%d",
+			sessionID, r.host.peerID, peerID, reflexiveIP, punchPort)
 	}
 	return r, true
 }

@@ -913,13 +913,17 @@ func (e *Engine) probePairedPeer(id string) {
 	defer cancel()
 
 	inv, hasInv := e.paired.InviteMeta(id)
+	var punchConn *net.UDPConn
 	if hasInv && rendezvous.Enabled() {
-		inv, peer = e.rendezvousJoin(ctx, inv, peer, id)
+		inv, peer, punchConn = e.rendezvousJoin(ctx, inv, peer, id)
 	} else if p, ok := e.paired.Get(id); ok {
 		peer = p
 	}
+	if punchConn != nil {
+		defer punchConn.Close()
+	}
 	if hasInv && inv.PunchPort > 0 {
-		if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID); err != nil {
+		if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID, punchConn); err != nil {
 			e.logf("paired peer %q punch: %v", peer.Name, err)
 		}
 	}
@@ -934,12 +938,11 @@ func (e *Engine) probePairedPeer(id string) {
 	e.emitPeers()
 }
 
-func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer protocol.DeviceInfo, id string) (invite.Parsed, protocol.DeviceInfo) {
+func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer protocol.DeviceInfo, id string) (invite.Parsed, protocol.DeviceInfo, *net.UDPConn) {
 	punchConn, punchPort, err := pairing.ListenPunchUDP()
 	if err != nil {
-		return inv, peer
+		return inv, peer, nil
 	}
-	defer punchConn.Close()
 
 	client := rendezvous.NewClient()
 	host, err := client.Join(ctx, rendezvous.JoinRequest{
@@ -950,16 +953,17 @@ func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer pro
 	})
 	if err != nil {
 		e.logf("rendezvous join: %v", err)
-		return inv, peer
+		punchConn.Close()
+		return inv, peer, nil
 	}
-	e.logf("rendezvous: joined session, host reflexive %s", host.ReflexiveAddr)
+	e.logf("rendezvous: joined session, host reflexive %s (local punch UDP %d)", host.ReflexiveAddr, punchPort)
 	inv = rendezvous.ApplyHostInfo(inv, host)
 	peer = inv.DialDevice()
 	peer.Paired = true
 	peer.PairStatus = pairing.StatusConnecting
 	e.paired.UpdateInvite(id, inv, peer)
 	e.emitPeers()
-	return inv, peer
+	return inv, peer, punchConn
 }
 
 // ImportInviteBytes parses a .swoopinvite file or invite PNG.
