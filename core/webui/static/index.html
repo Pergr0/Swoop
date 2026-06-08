@@ -273,25 +273,21 @@
 
 
 
-  <div class="card" id="chatCard">
+  <div class="card" id="sendCard">
 
-    <h2 class="card-title">Сообщения</h2>
+    <h2 class="card-title" id="sendTitle">Отправить на компьютер</h2>
 
-    <div class="chat-list" id="chatList">
+    <label class="btn" for="pick">Выбрать файлы</label>
 
-      <div class="chat-empty" id="chatEmpty">Короткие заметки и ссылки с компьютером.</div>
+    <input id="pick" type="file" multiple />
 
-    </div>
+    <div class="files" id="fileList">Файлы не выбраны</div>
 
-    <form class="chat-form" id="chatForm">
+    <button type="button" class="primary" id="send" disabled>Отправить</button>
 
-      <input id="chatInput" type="text" maxlength="8192" placeholder="Сообщение или ссылка…" autocomplete="off" />
+    <div class="bar" id="bar"><i id="barFill"></i></div>
 
-      <button type="submit" class="primary" id="chatSend">Отпр.</button>
-
-    </form>
-
-    <div class="status" id="chatStatus"></div>
+    <div class="status" id="status"></div>
 
   </div>
 
@@ -299,7 +295,7 @@
 
   <div class="card" id="pullCard">
 
-    <h2 class="card-title">Получить с компьютера</h2>
+    <h2 class="card-title" id="pullTitle">Получить с компьютера</h2>
 
     <p class="pull-hint" id="pullHint">Страница открыта — компьютер может отправить файлы. Запрос появится здесь после нажатия «Отправить» на ПК.</p>
 
@@ -329,21 +325,25 @@
 
 
 
-  <div class="card">
+  <div class="card" id="chatCard">
 
-    <h2 class="card-title">Отправить на компьютер</h2>
+    <h2 class="card-title" id="chatTitle">Сообщения</h2>
 
-    <label class="btn" for="pick">Выбрать файлы</label>
+    <div class="chat-list" id="chatList">
 
-    <input id="pick" type="file" multiple />
+      <div class="chat-empty" id="chatEmpty">Короткие заметки и ссылки с компьютером.</div>
 
-    <div class="files" id="fileList">Файлы не выбраны</div>
+    </div>
 
-    <button type="button" class="primary" id="send" disabled>Отправить</button>
+    <form class="chat-form" id="chatForm">
 
-    <div class="bar" id="bar"><i id="barFill"></i></div>
+      <input id="chatInput" type="text" maxlength="8192" placeholder="Сообщение или ссылка…" autocomplete="off" />
 
-    <div class="status" id="status"></div>
+      <button type="submit" class="primary" id="chatSend">Отпр.</button>
+
+    </form>
+
+    <div class="status" id="chatStatus"></div>
 
   </div>
 

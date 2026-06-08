@@ -7,7 +7,7 @@ const en = {
     "Launch Swoop on another device on the same network — it will appear here automatically.",
 
   "devices.title": "Devices",
-  "devices.back": "Devices",
+  "devices.back": "Back to devices",
   "devices.backAria": "Back to devices",
   "devices.online": "Online",
   "devices.thisDevice": "this device",
@@ -15,6 +15,7 @@ const en = {
   "devices.browser": "Browser",
 
   "drop.overlay": "Release to add files",
+  "drop.tileHint": "Release to send here",
   "drop.emptyTitle": "Drag files or folders into this window",
   "drop.emptyHint": "or pick them with the buttons below",
 
@@ -54,6 +55,7 @@ const en = {
   "transfer.andMore": "and {n} more…",
   "transfer.accept": "Accept",
   "transfer.decline": "Decline",
+  "transfer.incomingBadge": "Incoming file transfer",
   "transfer.openFolder": "Open folder",
 
   "chat.title": "Messages",
@@ -73,14 +75,16 @@ const en = {
     "Swoop will discover devices and receive files through the selected interface. Pick the one on the same network as other devices. You cannot change it after launch — restart the app.",
   "iface.auto": "Auto",
   "iface.autoSub": "Choose route automatically",
+  "iface.recommended": "Recommended",
   "iface.continue": "Continue",
   "iface.starting": "Starting…",
 
-  "qr.title": "Send from phone",
-  "qr.sub": "Scan the QR code with your phone camera (same Wi‑Fi network)",
-  "qr.alt": "QR code with link to send files",
-  "qr.btnTitle": "QR to send from phone",
-  "qr.btnAria": "Show QR code",
+  "qr.title": "Connect a mobile device",
+  "qr.sub":
+    "Scan with your phone or tablet camera (same Wi‑Fi). Send files to this computer or receive from it — no app install.",
+  "qr.alt": "QR code to open the file exchange page in a browser",
+  "qr.btnTitle": "Connect a mobile device",
+  "qr.btnAria": "Show QR code to connect a mobile device",
   "qr.closeAria": "Close",
 
   "common.close": "Close",

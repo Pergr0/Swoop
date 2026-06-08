@@ -130,10 +130,12 @@
     if (sub) sub.textContent = t("pageSub");
     const hostName = document.getElementById("hostName");
     if (hostName) hostName.textContent = t("connecting");
-    const titles = document.querySelectorAll(".card-title");
-    if (titles[0]) titles[0].textContent = t("chatTitle");
-    if (titles[1]) titles[1].textContent = t("pullTitle");
-    if (titles[2]) titles[2].textContent = t("sendTitle");
+    const sendTitle = document.getElementById("sendTitle");
+    if (sendTitle) sendTitle.textContent = t("sendTitle");
+    const pullTitle = document.getElementById("pullTitle");
+    if (pullTitle) pullTitle.textContent = t("pullTitle");
+    const chatTitle = document.getElementById("chatTitle");
+    if (chatTitle) chatTitle.textContent = t("chatTitle");
     const chatEmpty = document.getElementById("chatEmpty");
     if (chatEmpty) chatEmpty.textContent = t("chatEmpty");
     const chatInput = document.getElementById("chatInput");

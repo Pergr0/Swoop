@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import {
     Peers,
     SelfInfo,
@@ -26,6 +26,7 @@
   import TransferPanel from "./components/TransferPanel.svelte";
   import ChevronIcon from "./components/ChevronIcon.svelte";
   import QrModal from "./components/QrModal.svelte";
+  import QrCodeImage from "./components/QrCodeImage.svelte";
   import { t, localizeError, discoveryLabelFor, folderCountLabel } from "./i18n";
 
   interface DeviceInfo {
@@ -34,7 +35,14 @@
     browser?: string;
   }
   interface NetInterface {
-    name: string; addresses: string[]; kind: string; up: boolean; speedMbps: number;
+    name: string;
+    displayName?: string;
+    ssid?: string;
+    addresses: string[];
+    kind: string;
+    up: boolean;
+    speedMbps: number;
+    recommended?: boolean;
   }
   interface StagingEntry {
     path: string; name: string; kind: string; relPath: string;
@@ -89,9 +97,15 @@
   let chatExpanded = false;
   let dropHover = false;
   let dragDepth = 0;
+  let gridDropTarget: string | null = null;
+  let tileDragDepth: Record<string, number> = {};
+  let suppressDeviceClick = false;
 
   function canWindowDrop(): boolean {
     return view === "device" && !sending;
+  }
+  function canGridDrop(): boolean {
+    return started && view === "grid" && peers.length > 0 && !sending;
   }
   function onDragEnter(e: DragEvent) {
     if (!canWindowDrop()) return;
@@ -142,6 +156,13 @@
     const addr = s.address || s.host;
     if (!addr || !s.controlPort) return "";
     return `https://${addr}:${s.controlPort}/`;
+  }
+  function ifaceLabel(it: NetInterface): string {
+    return it.displayName || it.name;
+  }
+  function defaultIfaceChoice(list: NetInterface[]): string {
+    const rec = list.find((i) => i.recommended);
+    return rec ? rec.name : "";
   }
   function fmtSpeedMbps(mbps: number): string {
     if (!mbps || mbps <= 0) return "";
@@ -231,6 +252,7 @@
   $: sendPct = sendProgress && sendProgress.total > 0 ? (sendProgress.bytes / sendProgress.total) * 100 : 0;
   $: recvPct = recvProgress && recvProgress.total > 0 ? (recvProgress.bytes / recvProgress.total) * 100 : 0;
   $: discoveryLabel = discoveryLabelFor(peers.length);
+  $: mobileQrUrl = started && self ? webUploadURL(self) : "";
   $: chatBadge =
     selected && unread[selected.id]
       ? unread[selected.id]
@@ -256,6 +278,83 @@
     scrollChatSoon();
     markReadSoon(p.id);
   }
+  function onDeviceClick(p: DeviceInfo) {
+    if (suppressDeviceClick) {
+      suppressDeviceClick = false;
+      return;
+    }
+    selectDevice(p);
+  }
+  function clearGridDropHover() {
+    gridDropTarget = null;
+    tileDragDepth = {};
+  }
+  function peerAtDropPoint(x: number, y: number): DeviceInfo | null {
+    const el = document.elementFromPoint(x, y);
+    const tile = el?.closest("[data-device-id]") as HTMLElement | null;
+    if (!tile?.dataset.deviceId) return null;
+    return peers.find((p) => p.id === tile.dataset.deviceId) ?? null;
+  }
+  function onTileDragEnter(e: DragEvent, peerId: string) {
+    if (!canGridDrop()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    tileDragDepth[peerId] = (tileDragDepth[peerId] ?? 0) + 1;
+    tileDragDepth = tileDragDepth;
+    gridDropTarget = peerId;
+  }
+  function onTileDragLeave(e: DragEvent, peerId: string) {
+    if (!canGridDrop()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const next = Math.max(0, (tileDragDepth[peerId] ?? 0) - 1);
+    if (next === 0) {
+      delete tileDragDepth[peerId];
+      if (gridDropTarget === peerId) gridDropTarget = null;
+    } else {
+      tileDragDepth[peerId] = next;
+    }
+    tileDragDepth = tileDragDepth;
+  }
+  function onTileDragOver(e: DragEvent, peerId: string) {
+    if (!canGridDrop()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    gridDropTarget = peerId;
+  }
+  async function sendDroppedToDevice(p: DeviceInfo, paths: string[]) {
+    if (!paths?.length || sending) return;
+    suppressDeviceClick = true;
+    clearGridDropHover();
+    clearStaged();
+    try {
+      await selectDevice(p);
+      await addPaths(paths);
+      await tick();
+      if (selectedCount === 0) return;
+      await doSend();
+    } finally {
+      setTimeout(() => { suppressDeviceClick = false; }, 0);
+    }
+  }
+  type DropPayload = string[] | { paths: string[]; x?: number; y?: number };
+  function parseDropPayload(payload: DropPayload): { paths: string[]; x: number; y: number } {
+    if (Array.isArray(payload)) return { paths: payload, x: 0, y: 0 };
+    return { paths: payload.paths ?? [], x: payload.x ?? 0, y: payload.y ?? 0 };
+  }
+  function handleFileDrop(x: number, y: number, paths: string[]) {
+    if (!started || !paths?.length || sending) return;
+    if (view === "device") {
+      addPaths(paths);
+      return;
+    }
+    if (view === "grid" && peers.length > 0) {
+      const peer =
+        peerAtDropPoint(x, y) ??
+        (gridDropTarget ? peers.find((p) => p.id === gridDropTarget) ?? null : null);
+      if (peer) sendDroppedToDevice(peer, paths);
+    }
+  }
 
   function markReadSoon(peerId: string) {
     if (chatMessages.some((m) => m.dir === "in")) {
@@ -267,6 +366,7 @@
     chatMessages = [];
     dragDepth = 0;
     dropHover = false;
+    clearGridDropHover();
   }
 
   function scrollChatSoon() {
@@ -386,9 +486,14 @@
     }
     self = (await SelfInfo()) as DeviceInfo;
     downloadsPath = (await DownloadsPath()) as string;
+    await tick();
+    nudgeLayout();
     await refresh();
     unsub.push(EventsOn("peers:changed", (d: DeviceInfo[]) => (peers = d ?? [])));
-    unsub.push(EventsOn("files:dropped", (paths: string[]) => { if (view === "device") addPaths(paths); }));
+    unsub.push(EventsOn("files:dropped", (payload: DropPayload) => {
+      const { paths, x, y } = parseDropPayload(payload);
+      handleFileDrop(x, y, paths);
+    }));
     unsub.push(EventsOn("transfer:offer", (o: Offer) => { incoming = o; recvState = null; recvProgress = null; }));
     unsub.push(EventsOn("transfer:progress", (p: Progress) => {
       if (p.direction === "send") sendProgress = p; else recvProgress = p;
@@ -419,9 +524,14 @@
     starting = false;
   }
 
+  function nudgeLayout() {
+    requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+  }
+
   onMount(async () => {
     OnFileDrop(() => {}, false);
     unsub.push(() => OnFileDropOff());
+    nudgeLayout();
 
     interfaces = ((await Interfaces()) as NetInterface[]) ?? [];
     try {
@@ -429,12 +539,10 @@
       if (saved !== null) {
         chosenIface = saved;
       } else {
-        const preferred = interfaces.find((i) => i.kind === "ethernet" || i.kind === "wifi");
-        chosenIface = preferred ? preferred.name : "";
+        chosenIface = defaultIfaceChoice(interfaces);
       }
     } catch {
-      const preferred = interfaces.find((i) => i.kind === "ethernet" || i.kind === "wifi");
-      chosenIface = preferred ? preferred.name : "";
+      chosenIface = defaultIfaceChoice(interfaces);
     }
   });
   onDestroy(() => {
@@ -476,7 +584,7 @@
           {#if started && webUploadURL(self)}
             <button
               type="button"
-              class="btn-qr"
+              class="btn-qr btn-surface"
               title={t("qr.btnTitle")}
               aria-label={t("qr.btnAria")}
               on:click={() => (showQr = true)}
@@ -525,21 +633,40 @@
       <h2 class="section-title">{t("devices.title")} <span class="count">{peers.length}</span></h2>
       {#if peers.length === 0}
         <div class="empty">
-          <div class="empty-art" aria-hidden="true">
-            <DiscoveryIcon size={56} />
+          <div class="empty-foreground">
+            <div class="empty-art" aria-hidden="true">
+              <DiscoveryIcon size={56} />
+            </div>
+            <p>{t("discovery.emptyTitle")}</p>
+            <small>{t("discovery.emptyHint")}</small>
           </div>
-          <p>{t("discovery.emptyTitle")}</p>
-          <small>{t("discovery.emptyHint")}</small>
+          {#if mobileQrUrl}
+            <div class="empty-qr-panel">
+              <QrCodeImage url={mobileQrUrl} size={200} alt={t("qr.alt")} muted />
+            </div>
+          {/if}
         </div>
       {:else}
         <div class="grid">
           {#each peers as p (p.id)}
             <button
               class="device"
+              class:device-drop-target={gridDropTarget === p.id}
+              data-device-id={p.id}
               title="{isWebPeer(p) ? `${p.name} · ${p.browser || t('devices.browser')}` : `${p.name} · ${p.fingerprint}`}"
-              on:click={() => selectDevice(p)}
+              on:click={() => onDeviceClick(p)}
+              on:dragenter={(e) => onTileDragEnter(e, p.id)}
+              on:dragleave={(e) => onTileDragLeave(e, p.id)}
+              on:dragover={(e) => onTileDragOver(e, p.id)}
             >
-              {#if unread[p.id] && !isWebPeer(p)}<span class="badge">{unread[p.id]}</span>{/if}
+              {#if gridDropTarget === p.id}
+                <span class="device-drop-hint" aria-hidden="true">{t("drop.tileHint")}</span>
+              {/if}
+              {#if incoming?.sender.id === p.id}
+                <span class="badge badge-transfer" title={t("transfer.incomingBadge")} aria-label={t("transfer.incomingBadge")}>↓</span>
+              {:else if unread[p.id] && !isWebPeer(p)}
+                <span class="badge">{unread[p.id]}</span>
+              {/if}
               <PlatformIcon platform={p.platform} size={48} />
               <div class="device-name">
                 <span class="device-online" title={t("devices.online")} aria-hidden="true"></span>
@@ -554,7 +681,7 @@
   {:else if view === "device" && selected}
     <section class="card-view view-panel">
       <div class="device-top">
-        <button class="back" on:click={back} aria-label={t("devices.backAria")}>
+        <button type="button" class="btn-back btn-surface" on:click={back}>
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M15.4 5.4 9.8 11l5.6 5.6-1.8 1.8L6.2 11l7.4-7.4 1.8 1.8z"/></svg>
           <span>{t("devices.back")}</span>
         </button>
@@ -762,8 +889,16 @@
             <span class="iface-radio" aria-hidden="true"></span>
             <NetIcon kind={it.kind} />
             <div class="iface-meta">
-              <div class="iface-name">{it.name}</div>
+              <div class="iface-name-row">
+                <div class="iface-name">{ifaceLabel(it)}</div>
+                {#if it.recommended}
+                  <span class="iface-rec">{t("iface.recommended")}</span>
+                {/if}
+              </div>
               <div class="iface-sub">
+                {#if it.displayName && it.displayName !== it.name}
+                  <span class="iface-device">{it.name}</span>
+                {/if}
                 <span class="iface-ip">{it.addresses.join(", ")}</span>
                 {#if fmtSpeedMbps(it.speedMbps)}<span class="iface-speed">{fmtSpeedMbps(it.speedMbps)}</span>{/if}
               </div>
@@ -866,6 +1001,8 @@
     flex-direction: column;
     height: 100vh;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     padding: var(--space-5) var(--space-6) var(--space-3);
     overflow: hidden;
   }
@@ -908,15 +1045,26 @@
     justify-content: space-between;
     margin-bottom: var(--space-5);
     gap: var(--space-4);
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
   }
-  .brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+    flex: 1 1 auto;
+  }
   .brand-text { min-width: 0; }
   .brand h1 { font-size: var(--text-xl); margin: 0; font-weight: 700; line-height: 1.2; }
   .brand-status { margin: 2px 0 0; font-size: var(--text-sm); color: var(--color-text-muted); }
   .header-end {
     display: flex;
     align-items: center;
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
   }
   .header-self {
     display: grid;
@@ -924,15 +1072,10 @@
     grid-auto-columns: auto max-content;
     gap: var(--space-3);
     align-items: stretch;
+    min-width: 0;
+    max-width: 100%;
   }
-  .btn-qr {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    aspect-ratio: 1;
-    width: auto;
-    padding: 0;
+  .btn-surface {
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
     background: var(--color-surface);
@@ -940,19 +1083,58 @@
     cursor: pointer;
     transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
   }
-  .btn-qr:hover {
+  .btn-surface:hover {
     border-color: var(--color-accent);
     color: var(--color-accent);
     background: var(--color-surface-raised);
   }
-  .btn-qr-icon { display: block; }
-  .self-card {
-    display: flex; align-items: center; gap: var(--space-3);
-    background: var(--color-surface); border: 1px solid var(--color-border);
-    border-radius: var(--radius-md); padding: 10px 16px; flex-shrink: 0;
+  .btn-qr {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 100%;
+    aspect-ratio: 1;
+    width: auto;
+    padding: 0;
   }
-  .self-name { font-size: var(--text-base); font-weight: 600; }
-  .self-sub { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 2px; }
+  .btn-qr-icon { display: block; }
+  .btn-back {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: 12px 18px;
+    font-size: var(--text-base);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .self-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 10px 16px;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .self-meta { min-width: 0; }
+  .self-name {
+    font-size: var(--text-base);
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .self-sub {
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .devices { flex: 1; min-height: 0; }
   .view-panel {
@@ -974,8 +1156,12 @@
   .empty {
     width: 100%;
     text-align: center;
-    margin-top: 64px;
+    margin-top: var(--space-6);
     color: var(--color-text-faint);
+  }
+  .empty-foreground {
+    width: 100%;
+    padding-top: var(--space-5);
   }
   .empty-art {
     display: flex;
@@ -996,6 +1182,13 @@
     max-width: 420px;
     font-size: var(--text-sm);
     line-height: 1.5;
+  }
+  .empty-qr-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: var(--space-7);
+    padding-bottom: var(--space-4);
   }
 
   .grid {
@@ -1018,13 +1211,67 @@
     cursor: pointer;
     color: inherit;
     transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+    overflow: hidden;
+  }
+  .device > :not(.device-drop-hint) {
+    position: relative;
+    z-index: 1;
+  }
+  .device.device-drop-target {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-accent) 45%, transparent), 0 8px 28px rgba(0, 0, 0, 0.22);
+  }
+  .device.device-drop-target::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface));
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .device-drop-hint {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    transform: translateX(-50%);
+    z-index: 2;
+    max-width: calc(100% - 16px);
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-accent) 88%, #000);
+    color: #fff;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+  }
+  .device.device-drop-target .device-host {
+    opacity: 0.55;
   }
   .badge {
     position: absolute; top: 10px; right: 10px; min-width: 22px; height: 22px; padding: 0 6px;
     border-radius: 11px; background: var(--color-accent); color: #fff;
     font-size: var(--text-xs); font-weight: 700; line-height: 22px;
+    z-index: 2;
+  }
+  .badge-transfer {
+    background: var(--color-success);
+    font-size: 14px;
+    line-height: 22px;
+    animation: badge-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes badge-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.08); }
   }
   .device:hover { border-color: var(--color-accent); background: var(--color-surface-raised); box-shadow: 0 4px 16px rgba(0,0,0,.18); }
+  .device.device-drop-target:hover { background: var(--color-surface); }
   .device-name {
     display: flex;
     align-items: center;
@@ -1052,10 +1299,7 @@
   .save-footer {
     flex-shrink: 0;
     margin-top: auto;
-    padding: var(--space-3) var(--space-4);
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-btn);
+    padding: var(--space-2) 0 var(--space-1);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1076,17 +1320,12 @@
     display: flex; flex-direction: column; gap: var(--space-3);
   }
   .device-top {
-    display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
-    background: var(--color-surface); border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg); padding: var(--space-3) var(--space-4);
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    flex-shrink: 0;
   }
-  .back {
-    display: inline-flex; align-items: center; gap: var(--space-2);
-    background: none; border: none; color: var(--color-accent-muted);
-    cursor: pointer; font-size: var(--text-base); padding: var(--space-2);
-  }
-  .back:hover { color: var(--color-text); }
-  .device-top-meta { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+  .device-top-meta { display: flex; align-items: center; gap: var(--space-3); min-width: 0; flex: 1; }
   .device-top-name { font-size: var(--text-md); font-weight: 600; }
   .device-top-sub { font-size: var(--text-sm); color: var(--color-text-faint); }
 
@@ -1366,8 +1605,24 @@
     border-color: var(--color-accent); box-shadow: inset 0 0 0 4px var(--color-accent);
   }
   .iface-meta { flex: 1; min-width: 0; }
+  .iface-name-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
   .iface-name { font-size: var(--text-base); font-weight: 600; }
+  .iface-rec {
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--color-success-text);
+    background: var(--color-success-bg);
+    border-radius: 999px;
+    padding: 2px 8px;
+    line-height: 1.35;
+  }
   .iface-sub { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 2px; display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .iface-device { font-family: var(--font-mono); color: var(--color-text-faint); }
   .iface-ip { font-family: var(--font-mono); color: var(--color-accent-muted); }
   .iface-speed { color: var(--color-success-text); }
 </style>

@@ -1,25 +1,10 @@
 <script lang="ts">
-  import QRCode from "qrcode";
   import { t } from "../i18n";
+  import QrCodeImage from "./QrCodeImage.svelte";
 
   export let open = false;
   export let url = "";
   export let onClose: () => void = () => {};
-
-  let dataUrl = "";
-
-  $: if (open && url) {
-    QRCode.toDataURL(url, {
-      width: 280,
-      margin: 2,
-      errorCorrectionLevel: "M",
-      color: { dark: "#e8edf5ff", light: "#171d27ff" },
-    })
-      .then((d) => (dataUrl = d))
-      .catch(() => (dataUrl = ""));
-  } else if (!open) {
-    dataUrl = "";
-  }
 
   function backdropClick(e: MouseEvent) {
     if (e.target === e.currentTarget) onClose();
@@ -36,11 +21,7 @@
       </button>
       <h3 id="qr-title">{t("qr.title")}</h3>
       <p class="modal-sub">{t("qr.sub")}</p>
-      {#if dataUrl}
-        <img class="qr-image" src={dataUrl} width="280" height="280" alt={t("qr.alt")} />
-      {:else}
-        <div class="qr-placeholder" aria-hidden="true"></div>
-      {/if}
+      <QrCodeImage {url} size={280} alt={t("qr.alt")} />
       {#if url}
         <p class="qr-url">{url}</p>
       {/if}
@@ -87,7 +68,7 @@
   .modal-sub {
     font-size: var(--text-sm);
     color: var(--color-text-muted);
-    margin: var(--space-1) 0;
+    margin: var(--space-1) 0 var(--space-4);
   }
   .modal-qr { width: min(360px, 92vw); }
   .modal-close {
@@ -110,18 +91,9 @@
     background: var(--color-surface-inset);
     color: var(--color-text);
   }
-  .qr-image {
-    display: block;
-    margin: var(--space-4) auto 0;
-    border-radius: var(--radius-md);
-    background: var(--color-surface-inset);
-  }
-  .qr-placeholder {
-    width: 280px;
-    height: 280px;
-    margin: var(--space-4) auto 0;
-    border-radius: var(--radius-md);
-    background: var(--color-surface-inset);
+  .modal-qr :global(.qr-image),
+  .modal-qr :global(.qr-placeholder) {
+    margin: 0 auto;
   }
   .qr-url {
     margin: var(--space-3) 0 0;

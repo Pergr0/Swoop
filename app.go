@@ -64,8 +64,12 @@ func (a *App) startup(ctx context.Context) {
 		wruntime.EventsEmit(ctx, "chat:read", peerID, upToTs)
 	})
 
-	wruntime.OnFileDrop(ctx, func(_, _ int, paths []string) {
-		wruntime.EventsEmit(ctx, "files:dropped", paths)
+	wruntime.OnFileDrop(ctx, func(x, y int, paths []string) {
+		wruntime.EventsEmit(ctx, "files:dropped", map[string]any{
+			"paths": paths,
+			"x":     x,
+			"y":     y,
+		})
 	})
 	// Networking is started from the UI once the user picks a network interface
 	// (see StartEngine).

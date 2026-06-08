@@ -1,6 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Wi-Fi">
-  <path fill="none" stroke="#9FD0FF" stroke-width="2.2" stroke-linecap="round" d="M5.5 20.5a11.5 11.5 0 0 1 21 0"/>
-  <path fill="none" stroke="#9FD0FF" stroke-width="2.2" stroke-linecap="round" d="M9.5 20.5a7.5 7.5 0 0 1 13 0"/>
-  <path fill="none" stroke="#3A8BFF" stroke-width="2.2" stroke-linecap="round" d="M13 20.5a4 4 0 0 1 6 0"/>
-  <circle cx="16" cy="26" r="2.2" fill="#3A8BFF"/>
+  <defs>
+    <!-- ~72° wedge (20% of circle), centered upward -->
+    <clipPath id="wifi-wedge">
+      <path d="M 16 28.5 L 7.2 16.4 A 14.8 14.8 0 0 1 24.8 16.4 Z"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#wifi-wedge)">
+    <!-- Arc centers at (16, 28.5); radii 4 / 8 / 12 — equal 4px spacing -->
+    <path fill="none" stroke="#9FD0FF" stroke-width="2" stroke-linecap="round"
+      d="M 8.95 18.8 A 12 12 0 0 1 23.05 18.8"/>
+    <path fill="none" stroke="#9FD0FF" stroke-width="2" stroke-linecap="round"
+      d="M 11.3 22.0 A 8 8 0 0 1 20.7 22.0"/>
+    <path fill="none" stroke="#3A8BFF" stroke-width="2" stroke-linecap="round"
+      d="M 13.65 25.3 A 4 4 0 0 1 18.35 25.3"/>
+    <circle cx="16" cy="28.5" r="1.6" fill="#3A8BFF"/>
+  </g>
 </svg>

@@ -7,17 +7,21 @@ package netif
 
 import (
 	"net"
+	"sort"
 	"strings"
 )
 
 // NetInterface is a user-selectable network interface. (Named NetInterface
 // rather than Interface because Wails' binding generator reserves "Interface".)
 type NetInterface struct {
-	Name      string   `json:"name"`
-	Addresses []string `json:"addresses"` // IPv4 addresses
-	Kind      string   `json:"kind"`      // wifi|ethernet|tunnel|virtual|other
-	Up        bool     `json:"up"`
-	SpeedMbps int      `json:"speedMbps"` // best-effort; 0 when unknown
+	Name        string   `json:"name"`
+	DisplayName string   `json:"displayName,omitempty"` // SSID or friendly hardware label
+	SSID        string   `json:"ssid,omitempty"`
+	Addresses   []string `json:"addresses"` // IPv4 addresses
+	Kind        string   `json:"kind"`      // wifi|ethernet|tunnel|virtual|other
+	Up          bool     `json:"up"`
+	SpeedMbps   int      `json:"speedMbps"` // best-effort; 0 when unknown
+	Recommended bool     `json:"recommended"`
 }
 
 // List returns the usable IPv4 interfaces (up, non-loopback, with an address).
@@ -35,15 +39,61 @@ func List() []NetInterface {
 		if len(addrs) == 0 {
 			continue
 		}
-		out = append(out, NetInterface{
+		ni := NetInterface{
 			Name:      ifi.Name,
 			Addresses: addrs,
 			Kind:      kindOf(ifi.Name),
 			Up:        true,
 			SpeedMbps: speedMbps(ifi.Name),
-		})
+		}
+		enrichInterface(&ni)
+		out = append(out, ni)
 	}
+	sortInterfaces(out)
+	markRecommended(out)
 	return out
+}
+
+func kindPriority(kind string) int {
+	switch kind {
+	case "wifi":
+		return 0
+	case "ethernet":
+		return 1
+	case "tunnel":
+		return 2
+	case "virtual":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func sortInterfaces(list []NetInterface) {
+	sort.SliceStable(list, func(i, j int) bool {
+		pi, pj := kindPriority(list[i].Kind), kindPriority(list[j].Kind)
+		if pi != pj {
+			return pi < pj
+		}
+		return list[i].Name < list[j].Name
+	})
+}
+
+func markRecommended(list []NetInterface) {
+	for i := range list {
+		list[i].Recommended = false
+	}
+	for _, kind := range []string{"wifi", "ethernet", "tunnel"} {
+		for i := range list {
+			if list[i].Kind == kind {
+				list[i].Recommended = true
+				return
+			}
+		}
+	}
+	if len(list) > 0 {
+		list[0].Recommended = true
+	}
 }
 
 func ipv4Addrs(ifi net.Interface) []string {
@@ -93,6 +143,22 @@ func kindOfName(name string) string {
 	}
 }
 
+func hardwarePortKindFromLabel(port string) string {
+	n := strings.ToLower(port)
+	switch {
+	case containsAny(n, "wi-fi", "wifi", "airport", "беспровод"):
+		return "wifi"
+	case containsAny(n, "vpn", "tunnel", "ppp", "ipsec"):
+		return "tunnel"
+	case containsAny(n, "bridge", "virtual", "vmware", "parallels"):
+		return "virtual"
+	case containsAny(n, "ethernet", "thunderbolt", "usb 10/", "usb 100/", "локальной сет"):
+		return "ethernet"
+	default:
+		return ""
+	}
+}
+
 func containsAny(s string, subs ...string) bool {
 	for _, sub := range subs {
 		if strings.Contains(s, sub) {
@@ -100,4 +166,29 @@ func containsAny(s string, subs ...string) bool {
 		}
 	}
 	return false
+}
+
+// parseNetshWLANInterfaces parses "netsh wlan show interfaces" (en/ru labels).
+func parseNetshWLANInterfaces(out string) map[string]string {
+	result := make(map[string]string)
+	var currentName string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		idx := strings.Index(line, ":")
+		if idx <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		keyLower := strings.ToLower(key)
+		switch {
+		case keyLower == "name" || key == "Имя":
+			currentName = val
+		case keyLower == "ssid":
+			if currentName != "" && val != "" && !strings.EqualFold(val, "n/a") {
+				result[currentName] = val
+			}
+		}
+	}
+	return result
 }
