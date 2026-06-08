@@ -9,9 +9,13 @@ import (
 )
 
 func userLocaleRussian() bool {
-	id, err := windows.GetUserDefaultUILanguage()
-	if err == nil && id&0x3ff == 0x19 { // LANG_RUSSIAN
-		return true
+	langs, err := windows.GetUserPreferredUILanguages(windows.MUI_LANGUAGE_NAME)
+	if err == nil {
+		for _, lang := range langs {
+			if isRussianTag(lang) {
+				return true
+			}
+		}
 	}
 	return locale_unix_fallback()
 }

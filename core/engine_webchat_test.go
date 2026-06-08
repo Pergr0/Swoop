@@ -13,6 +13,7 @@ func TestWebChatPollAndSend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer e.Close()
 	e.webPresence = webpresence.New(func() int { return 53317 })
 
 	const clientID = "web-test"

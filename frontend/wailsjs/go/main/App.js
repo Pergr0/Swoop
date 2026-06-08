@@ -30,6 +30,10 @@ export function Interfaces() {
   return window['go']['main']['App']['Interfaces']();
 }
 
+export function LogPath() {
+  return window['go']['main']['App']['LogPath']();
+}
+
 export function MarkRead(arg1) {
   return window['go']['main']['App']['MarkRead'](arg1);
 }

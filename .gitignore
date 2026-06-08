@@ -1,4 +1,5 @@
 build/bin
+build/build.log
 dist/
 build/windows/icon.ico
 build/windows/rsrc_*.syso

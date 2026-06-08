@@ -21,6 +21,8 @@ export function ImportInviteFile():Promise<main.ImportInviteResult>;
 
 export function Interfaces():Promise<Array<netif.NetInterface>>;
 
+export function LogPath():Promise<string>;
+
 export function MarkRead(arg1:string):Promise<void>;
 
 export function OpenFilePicker():Promise<Array<string>>;
