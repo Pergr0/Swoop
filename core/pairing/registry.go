@@ -69,6 +69,23 @@ func (r *Registry) Add(device protocol.DeviceInfo, inv invite.Parsed) {
 	}
 }
 
+// UpdateInvite refreshes stored invite endpoints after rendezvous signaling.
+func (r *Registry) UpdateInvite(id string, inv invite.Parsed, device protocol.DeviceInfo) {
+	r.mu.Lock()
+	e, ok := r.peers[id]
+	if !ok {
+		r.mu.Unlock()
+		return
+	}
+	device.Paired = true
+	device.PairStatus = e.status
+	e.invite = inv
+	e.info = device
+	r.peers[id] = e
+	r.mu.Unlock()
+	r.emit()
+}
+
 // Update replaces stored device info after a successful probe.
 func (r *Registry) Update(id string, device protocol.DeviceInfo) {
 	r.mu.Lock()

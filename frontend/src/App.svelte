@@ -611,6 +611,24 @@
     requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
   }
 
+  /** Match logo square to .self-card height (same approach as header IconButtons). */
+  function logoSizeFromSelfCard(node: HTMLElement) {
+    const sync = () => {
+      const card = node.closest("header")?.querySelector<HTMLElement>(".self-card");
+      const h = card?.getBoundingClientRect().height ?? 0;
+      const size = h > 0 ? Math.round(h) : 48;
+      node.style.width = `${size}px`;
+      node.style.height = `${size}px`;
+    };
+    const ro = new ResizeObserver(sync);
+    const header = node.closest("header");
+    const card = header?.querySelector(".self-card");
+    if (card) ro.observe(card);
+    if (header) ro.observe(header);
+    sync();
+    return { destroy: () => ro.disconnect() };
+  }
+
   onMount(async () => {
     OnFileDrop(() => {}, false);
     unsub.push(() => OnFileDropOff());
@@ -653,7 +671,9 @@
   {/if}
   <header class="app-header">
     <div class="brand">
-      <SwoopLogo size={34} />
+      <div class="brand-logo" use:logoSizeFromSelfCard>
+        <SwoopLogo />
+      </div>
       <div class="brand-text">
         <h1>Swoop</h1>
         {#if started}
@@ -1173,17 +1193,36 @@
   .brand {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: var(--space-3);
     min-width: 0;
-    flex: 1 1 auto;
+    flex: 0 1 auto;
+  }
+  .brand-logo {
+    display: block;
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+  }
+  .brand-logo :global(.swoop-logo) {
+    width: 100%;
+    height: 100%;
   }
   .brand-text { min-width: 0; }
   .brand h1 { font-size: var(--text-xl); margin: 0; font-weight: 700; line-height: 1.2; }
-  .brand-status { margin: 2px 0 0; font-size: var(--text-sm); color: var(--color-text-muted); }
+  .brand-status {
+    margin: 2px 0 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .header-end {
     display: flex;
     align-items: center;
-    flex: 0 1 auto;
+    flex: 0 0 auto;
+    margin-left: auto;
     min-width: 0;
     max-width: 100%;
   }

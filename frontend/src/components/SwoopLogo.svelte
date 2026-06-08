@@ -1,7 +1,8 @@
 <script lang="ts">
   import appIcon from "../../../build/appicon.png";
 
-  export let size = 34;
+  /** Fixed px size; omit to fill parent (e.g. header brand-logo stretch). */
+  export let size: number | undefined = undefined;
 </script>
 
 <img

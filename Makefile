@@ -4,11 +4,15 @@
 # only what is outdated, builds, and prints the binary location. On Linux it
 # auto-detects WebKit2GTK 4.1 and uses the webkit2_41 build tag.
 
-.PHONY: build check clean-deps dev doctor core-test cross-core
+.PHONY: build build-server check clean-deps dev doctor core-test cross-core
 
 # Full flow: check + install/update dependencies, then build.
 build:
 	bash scripts/build.sh
+
+# Linux-only rendezvous signaling server (no Wails / no CGO).
+build-server:
+	bash scripts/build-server.sh
 
 # Check and install/update dependencies only (no build).
 check:

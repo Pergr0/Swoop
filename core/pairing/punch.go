@@ -146,6 +146,28 @@ func readPunchAck(conn *net.UDPConn, sessionID string, ackCh chan<- struct{}) {
 	}
 }
 
+// SendPunchHello sends punch packets to a remote endpoint (host → joiner reverse punch).
+func SendPunchHello(conn *net.UDPConn, sessionID, targetHost string, targetPort int) error {
+	if conn == nil || sessionID == "" || targetHost == "" || targetPort <= 0 {
+		return errors.New("invalid punch target")
+	}
+	addr, err := net.ResolveUDPAddr("udp4", net.JoinHostPort(targetHost, itoa(targetPort)))
+	if err != nil {
+		return err
+	}
+	hello, err := json.Marshal(punchHello{Magic: punchMagic, SessionID: sessionID, PeerID: "host"})
+	if err != nil {
+		return err
+	}
+	for i := 0; i < 5; i++ {
+		if _, err := conn.WriteToUDP(hello, addr); err != nil {
+			return err
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+	return nil
+}
+
 func itoa(n int) string {
 	return strconv.Itoa(n)
 }

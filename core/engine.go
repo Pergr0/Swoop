@@ -30,6 +30,7 @@ import (
 	"swoop/core/netif"
 	"swoop/core/pairing"
 	"swoop/core/paths"
+	"swoop/core/rendezvous"
 	"swoop/core/protocol"
 	"swoop/core/transfer"
 	"swoop/core/transport"
@@ -784,6 +785,7 @@ func (e *Engine) GenerateInvite() (invite.Bundle, error) {
 
 	go pairing.RunPunchHost(hostCtx, punchConn, bundle.SessionID, e.logf)
 	go e.expireInviteHost(bundle.ExpiresAt)
+	go e.rendezvousHostLoop(hostCtx, bundle.SessionID, punchConn, punchPort, reach)
 
 	if reach != nil {
 		e.logf("internet invite: public %s:%d punch UDP %d", reach.Addr, reach.ControlPort, reach.PunchPort)
@@ -792,6 +794,53 @@ func (e *Engine) GenerateInvite() (invite.Bundle, error) {
 	}
 	return bundle, nil
 }
+
+func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punchConn *net.UDPConn, punchPort int, reach *invite.Reach) {
+	if !rendezvous.Enabled() {
+		return
+	}
+	self := e.Self()
+	client := rendezvous.NewClient()
+	regCtx, regCancel := context.WithTimeout(ctx, clientTimeout())
+	defer regCancel()
+	req := rendezvous.HostRegisterRequest{
+		SessionID:   sessionID,
+		PeerID:      self.ID,
+		DeviceName:  self.Name,
+		LanAddr:     self.Address,
+		ControlPort: e.server.Port(),
+		PunchPort:   punchPort,
+	}
+	if reach != nil {
+		req.ReachAddr = reach.Addr
+		req.ReachPort = reach.ControlPort
+	}
+	if err := client.RegisterHost(regCtx, req); err != nil {
+		e.logf("rendezvous register: %v", err)
+		return
+	}
+	e.logf("rendezvous: session registered (signaling only)")
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pollCtx, pollCancel := context.WithTimeout(ctx, 4*time.Second)
+			j, ok, err := client.PollJoiner(pollCtx, sessionID, self.ID)
+			pollCancel()
+			if err != nil || !ok {
+				continue
+			}
+			e.logf("rendezvous: joiner %s at %s:%d — reverse punch", j.PeerID, j.ReflexiveAddr, j.PunchPort)
+			_ = pairing.SendPunchHello(punchConn, sessionID, j.ReflexiveAddr, j.PunchPort)
+		}
+	}
+}
+
+func clientTimeout() time.Duration { return 8 * time.Second }
 
 func (e *Engine) stopInviteHost() {
 	e.inviteHostMu.Lock()
@@ -860,9 +909,16 @@ func (e *Engine) probePairedPeer(id string) {
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if inv, ok := e.paired.InviteMeta(id); ok && inv.PunchPort > 0 {
+
+	inv, hasInv := e.paired.InviteMeta(id)
+	if hasInv && rendezvous.Enabled() {
+		inv, peer = e.rendezvousJoin(ctx, inv, peer, id)
+	} else if p, ok := e.paired.Get(id); ok {
+		peer = p
+	}
+	if hasInv && inv.PunchPort > 0 {
 		if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID); err != nil {
 			e.logf("paired peer %q punch: %v", peer.Name, err)
 		}
@@ -876,6 +932,34 @@ func (e *Engine) probePairedPeer(id string) {
 	}
 	e.paired.Update(id, live)
 	e.emitPeers()
+}
+
+func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer protocol.DeviceInfo, id string) (invite.Parsed, protocol.DeviceInfo) {
+	punchConn, punchPort, err := pairing.ListenPunchUDP()
+	if err != nil {
+		return inv, peer
+	}
+	defer punchConn.Close()
+
+	client := rendezvous.NewClient()
+	host, err := client.Join(ctx, rendezvous.JoinRequest{
+		SessionID: inv.SessionID,
+		PeerID:    e.id.DeviceID,
+		PunchPort: punchPort,
+		LanAddr:   e.Self().Address,
+	})
+	if err != nil {
+		e.logf("rendezvous join: %v", err)
+		return inv, peer
+	}
+	e.logf("rendezvous: joined session, host reflexive %s", host.ReflexiveAddr)
+	inv = rendezvous.ApplyHostInfo(inv, host)
+	peer = inv.DialDevice()
+	peer.Paired = true
+	peer.PairStatus = pairing.StatusConnecting
+	e.paired.UpdateInvite(id, inv, peer)
+	e.emitPeers()
+	return inv, peer
 }
 
 // ImportInviteBytes parses a .swoopinvite file or invite PNG.
