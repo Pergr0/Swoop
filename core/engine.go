@@ -86,6 +86,7 @@ type Engine struct {
 	inviteNATRelease func()
 	invitePunchConn  *net.UDPConn
 	inviteOverlay    *overlay.Link
+	inviteJoinerID   string
 
 	overlayMu sync.Mutex
 	overlays  map[string]*overlay.Link
@@ -256,7 +257,9 @@ func (e *Engine) SendTo(deviceID string, items []protocol.SendItem) error {
 		return i18n.ErrDeviceNotFound(deviceID)
 	}
 	if peer.Platform != protocol.PlatformWeb && (peer.Address == "" || peer.ControlPort == 0) {
-		return i18n.ErrPeerNoAddress(peer.Name)
+		if e.overlayForPeer(deviceID) == nil {
+			return i18n.ErrPeerNoAddress(peer.Name)
+		}
 	}
 	return e.mgr.Send(peer, items)
 }
@@ -761,7 +764,29 @@ func (e *Engine) Peers() []protocol.DeviceInfo {
 			}
 		}
 	}
+	for i := range out {
+		out[i] = e.decoratePeer(out[i])
+	}
 	return out
+}
+
+func (e *Engine) decoratePeer(p protocol.DeviceInfo) protocol.DeviceInfo {
+	if p.Paired {
+		p.ConnectReach = protocol.ConnectInternet
+		if link := e.overlayForPeer(p.ID); link != nil {
+			switch link.Mode() {
+			case "relay":
+				p.ConnectPath = protocol.ConnectRelay
+			case "direct":
+				p.ConnectPath = protocol.ConnectP2P
+			}
+		} else if p.PairStatus == pairing.StatusConnected {
+			p.ConnectPath = protocol.ConnectP2P
+		}
+	} else {
+		p.ConnectReach = protocol.ConnectLocal
+	}
+	return p
 }
 
 // GenerateInvite creates a signed SwoopInvite blob for internet pairing.
@@ -806,7 +831,7 @@ func (e *Engine) GenerateInvite() (invite.Bundle, error) {
 
 	go pairing.RunPunchHost(hostCtx, punchConn, bundle.SessionID, e.logf)
 	go e.expireInviteHost(bundle.ExpiresAt)
-	go e.rendezvousHostLoop(hostCtx, bundle.SessionID, punchConn, punchPort, reach)
+	go e.rendezvousHostLoop(hostCtx, bundle.SessionID, punchConn, punchPort, reach, bundle.ExpiresAt)
 
 	if reach != nil {
 		e.logf("internet invite: public %s:%d punch UDP %d", reach.Addr, reach.ControlPort, reach.PunchPort)
@@ -816,7 +841,7 @@ func (e *Engine) GenerateInvite() (invite.Bundle, error) {
 	return bundle, nil
 }
 
-func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punchConn *net.UDPConn, punchPort int, reach *invite.Reach) {
+func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punchConn *net.UDPConn, punchPort int, reach *invite.Reach, expiresAt int64) {
 	if !rendezvous.Enabled() {
 		return
 	}
@@ -889,6 +914,7 @@ func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punch
 				continue
 			}
 			e.logf("rendezvous: joiner %s at %s:%d — reverse punch", j.PeerID, j.ReflexiveAddr, j.PunchPort)
+			e.pairRendezvousJoiner(sessionID, j, expiresAt)
 			_ = pairing.SendPunchHello(punchConn, sessionID, j.ReflexiveAddr, j.PunchPort)
 		}
 	}
@@ -906,6 +932,7 @@ func (e *Engine) stopInviteHost() {
 	e.invitePunchConn = nil
 	e.inviteNATRelease = nil
 	e.inviteOverlay = nil
+	e.inviteJoinerID = ""
 	e.inviteHostMu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -946,11 +973,17 @@ func (e *Engine) setOverlay(peerID string, link *overlay.Link, punch *net.UDPCon
 
 func (e *Engine) overlayForPeer(peerID string) *overlay.Link {
 	e.overlayMu.Lock()
-	defer e.overlayMu.Unlock()
-	if e.overlays == nil {
-		return nil
+	link := e.overlays[peerID]
+	e.overlayMu.Unlock()
+	if link != nil {
+		return link
 	}
-	return e.overlays[peerID]
+	e.inviteHostMu.Lock()
+	defer e.inviteHostMu.Unlock()
+	if e.inviteOverlay != nil && peerID == e.inviteJoinerID {
+		return e.inviteOverlay
+	}
+	return nil
 }
 
 func (e *Engine) removeOverlay(peerID string) {
@@ -1022,7 +1055,8 @@ func (e *Engine) probePairedPeer(id string) {
 
 	inv, hasInv := e.paired.InviteMeta(id)
 	if hasInv && rendezvous.Enabled() {
-		if e.overlayForPeer(id) == nil {
+		hostSide := inv.Device.ID == e.id.DeviceID
+		if !hostSide && e.overlayForPeer(id) == nil {
 			var joinerReflexive string
 			var punchConn *net.UDPConn
 			inv, peer, punchConn, joinerReflexive = e.rendezvousJoin(ctx, inv, peer, id)
@@ -1039,6 +1073,7 @@ func (e *Engine) probePairedPeer(id string) {
 				return
 			}
 			e.setOverlay(id, link, punchConn)
+			link.StartJoinerRelay(context.Background(), e.server.Port(), e.mgr.DataPort())
 			e.logf("overlay: tunnel to %q ready (%s)", peer.Name, link.Mode())
 			joinerPunch := 0
 			if punchConn != nil {
@@ -1078,6 +1113,9 @@ func (e *Engine) probePairedPeer(id string) {
 			}
 			return
 		}
+		if hostSide {
+			return
+		}
 	}
 
 	// Fallback: direct TCP when overlay unavailable (LAN / UPnP).
@@ -1103,18 +1141,62 @@ func (e *Engine) probePairedPeer(id string) {
 	e.emitPeers()
 }
 
+func (e *Engine) pairRendezvousJoiner(sessionID string, j rendezvous.JoinerInfo, expiresAt int64) {
+	if e.paired == nil || j.PeerID == "" || j.PeerID == e.id.DeviceID {
+		return
+	}
+	if _, ok := e.paired.Get(j.PeerID); ok {
+		return
+	}
+	self := e.Self()
+	caps := j.Capabilities
+	if len(caps) == 0 {
+		caps = []string{protocol.CapTCPPush, protocol.CapHTTPUpload, protocol.CapHTTPPull}
+	}
+	addr := j.LanAddr
+	if addr == "" {
+		addr = j.ReflexiveAddr
+	}
+	controlPort := j.ControlPort
+	if controlPort == 0 {
+		controlPort = protocol.DefaultControlPort
+	}
+	dev := protocol.DeviceInfo{
+		ID: j.PeerID, Name: j.DeviceName, Fingerprint: j.Fingerprint,
+		Address: addr, ControlPort: controlPort, Capabilities: caps,
+	}
+	if dev.Name == "" {
+		dev.Name = j.PeerID[:8]
+	}
+	inv := invite.Parsed{
+		SessionID: sessionID,
+		ExpiresAt: expiresAt,
+		Device:    self,
+	}
+	e.inviteHostMu.Lock()
+	e.inviteJoinerID = j.PeerID
+	e.inviteHostMu.Unlock()
+	e.paired.Add(dev, inv)
+	e.logf("internet invite: joiner %q paired on host (relay)", dev.Name)
+}
+
 func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer protocol.DeviceInfo, id string) (invite.Parsed, protocol.DeviceInfo, *net.UDPConn, string) {
 	punchConn, punchPort, err := pairing.ListenPunchUDP()
 	if err != nil {
 		return inv, peer, nil, ""
 	}
 
+	self := e.Self()
 	client := rendezvous.NewClient()
 	host, err := client.Join(ctx, rendezvous.JoinRequest{
-		SessionID: inv.SessionID,
-		PeerID:    e.id.DeviceID,
-		PunchPort: punchPort,
-		LanAddr:   e.Self().Address,
+		SessionID:    inv.SessionID,
+		PeerID:       e.id.DeviceID,
+		PunchPort:    punchPort,
+		LanAddr:      self.Address,
+		DeviceName:   self.Name,
+		Fingerprint:  self.Fingerprint,
+		ControlPort:  self.ControlPort,
+		Capabilities: self.Capabilities,
 	})
 	if err != nil {
 		e.logf("rendezvous join: %v", err)

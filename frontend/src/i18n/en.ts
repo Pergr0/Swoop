@@ -13,6 +13,10 @@ const en = {
   "devices.thisDevice": "this device",
   "devices.fingerprint": "fingerprint",
   "devices.browser": "Browser",
+  "connect.local": "Local network",
+  "connect.internet": "Internet (invite)",
+  "connect.relay": "Via relay server",
+  "connect.p2p": "Direct P2P",
 
   "drop.overlay": "Release to add files",
   "drop.tileHint": "Release to send here",

@@ -179,8 +179,18 @@ func ServeHost(ctx context.Context, p HostParams) (*Link, error) {
 		link.quicPort = port
 		go link.runQUICListener(ctx)
 	}
-	go link.serveRelayHost(ctx)
+	go link.serveRelayInbound(ctx)
 	return link, nil
+}
+
+// StartJoinerRelay accepts inbound overlay streams from the invite host and proxies
+// them to the local control/data plane (host → joiner over rendezvous relay).
+func (l *Link) StartJoinerRelay(ctx context.Context, controlPort, dataPort int) {
+	l.mu.Lock()
+	l.controlPort = controlPort
+	l.dataPort = dataPort
+	l.mu.Unlock()
+	go l.serveRelayInbound(ctx)
 }
 
 func (l *Link) runQUICListener(ctx context.Context) {
@@ -279,8 +289,8 @@ func (l *Link) upgradeToDirect(ctx context.Context, p UpgradeParams) error {
 	return nil
 }
 
-func (l *Link) serveRelayHost(ctx context.Context) {
-	mux := l.relayMuxSession()
+func (l *Link) serveRelayInbound(ctx context.Context) {
+	mux := l.activeMux()
 	if mux == nil {
 		return
 	}

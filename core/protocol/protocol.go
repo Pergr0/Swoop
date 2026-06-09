@@ -23,6 +23,14 @@ const (
 	// MaxPrepareUploadBodyBytes caps the JSON body of POST /api/v1/prepare-upload.
 	MaxPrepareUploadBodyBytes = 4 << 20 // 4 MiB
 
+	// ConnectReach values for UI badges (local LAN vs internet invite).
+	ConnectLocal    = "local"
+	ConnectInternet = "internet"
+
+	// ConnectPath values for internet peers (relay server vs direct P2P).
+	ConnectRelay = "relay"
+	ConnectP2P   = "p2p"
+
 	// Transfer limits for incoming offers (claimed sizes; enforced before accept).
 	MaxTransferFiles       = 4096
 	MaxTransferFileBytes   = 4 << 30  // 4 GiB per file
@@ -86,6 +94,10 @@ type DeviceInfo struct {
 	Paired bool `json:"paired,omitempty"`
 	// PairStatus is set for invite-paired peers: connecting, connected, error.
 	PairStatus string `json:"pairStatus,omitempty"`
+	// ConnectReach is "local" (LAN / browser) or "internet" (SwoopInvite pairing).
+	ConnectReach string `json:"connectReach,omitempty"`
+	// ConnectPath is "relay" or "p2p" for internet peers once the route is known.
+	ConnectPath string `json:"connectPath,omitempty"`
 }
 
 // PresenceRequest is sent by a browser client to appear in the desktop grid.

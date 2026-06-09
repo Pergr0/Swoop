@@ -9,7 +9,7 @@ func TestStoreHostJoinPoll(t *testing.T) {
 	s := NewStore(nil)
 	s.RegisterHost("sess1", "host-1", "Alice", "192.168.1.1", "", "203.0.113.1", 53317, 55000, 0)
 
-	room, ok := s.Join("sess1", "join-1", "10.0.0.2", "198.51.100.2", 55001)
+	room, ok := s.Join("sess1", "join-1", "10.0.0.2", "198.51.100.2", "Joiner", "sha256:abc", 55001, 53317, nil)
 	if !ok || room.host.peerID != "host-1" {
 		t.Fatal("join failed")
 	}

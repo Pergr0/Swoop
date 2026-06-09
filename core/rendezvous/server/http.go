@@ -74,7 +74,8 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reflexive := clientIP(r)
-	room, ok := s.Store.Join(req.SessionID, req.PeerID, req.LanAddr, reflexive, req.PunchPort)
+	room, ok := s.Store.Join(req.SessionID, req.PeerID, req.LanAddr, reflexive,
+		req.DeviceName, req.Fingerprint, req.PunchPort, req.ControlPort, req.Capabilities)
 	if !ok {
 		http.Error(w, "session not found", http.StatusNotFound)
 		return
@@ -116,6 +117,11 @@ func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	}
 	out := rendezvous.JoinerInfo{
 		PeerID:        j.peerID,
+		DeviceName:    j.deviceName,
+		LanAddr:       j.lanAddr,
+		Fingerprint:   j.fingerprint,
+		ControlPort:   j.controlPort,
+		Capabilities:  j.capabilities,
 		ReflexiveAddr: j.reflexiveIP,
 		PunchPort:     j.punchPort,
 	}

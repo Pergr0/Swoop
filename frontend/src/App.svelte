@@ -42,6 +42,8 @@
     browser?: string;
     paired?: boolean;
     pairStatus?: string;
+    connectReach?: string;
+    connectPath?: string;
   }
   interface NetInterface {
     name: string;
@@ -189,6 +191,19 @@
   }
   function isWebPeer(p: DeviceInfo): boolean {
     return p.platform === "web";
+  }
+  function connectReachLabel(p: DeviceInfo): "L" | "I" {
+    return p.connectReach === "internet" ? "I" : "L";
+  }
+  function connectReachTitle(p: DeviceInfo): string {
+    return p.connectReach === "internet" ? t("connect.internet") : t("connect.local");
+  }
+  function connectPathLabel(p: DeviceInfo): "R" | "P2P" | null {
+    if (p.connectReach !== "internet" || !p.connectPath) return null;
+    return p.connectPath === "relay" ? "R" : "P2P";
+  }
+  function connectPathTitle(p: DeviceInfo): string {
+    return p.connectPath === "relay" ? t("connect.relay") : t("connect.p2p");
   }
   function webUploadURL(s: DeviceInfo): string {
     const addr = s.address || s.host;
@@ -812,6 +827,22 @@
                   aria-hidden="true"
                 ></span>
                 <span>{p.name}</span>
+                <span class="conn-chips" aria-label={connectReachTitle(p)}>
+                  <span
+                    class="conn-chip"
+                    class:conn-chip-local={connectReachLabel(p) === "L"}
+                    class:conn-chip-internet={connectReachLabel(p) === "I"}
+                    title={connectReachTitle(p)}
+                  >{connectReachLabel(p)}</span>
+                  {#if connectPathLabel(p)}
+                    <span
+                      class="conn-chip"
+                      class:conn-chip-relay={p.connectPath === "relay"}
+                      class:conn-chip-p2p={p.connectPath === "p2p"}
+                      title={connectPathTitle(p)}
+                    >{connectPathLabel(p)}</span>
+                  {/if}
+                </span>
               </div>
               <div class="device-host">{peerSubtitle(p)}</div>
             </button>
@@ -829,7 +860,25 @@
         <div class="device-top-meta">
           <PlatformIcon platform={selected.platform} size={36} />
           <div>
-            <div class="device-top-name">{selected.name}</div>
+            <div class="device-top-name">
+              <span>{selected.name}</span>
+              <span class="conn-chips" aria-label={connectReachTitle(selected)}>
+                <span
+                  class="conn-chip"
+                  class:conn-chip-local={connectReachLabel(selected) === "L"}
+                  class:conn-chip-internet={connectReachLabel(selected) === "I"}
+                  title={connectReachTitle(selected)}
+                >{connectReachLabel(selected)}</span>
+                {#if connectPathLabel(selected)}
+                  <span
+                    class="conn-chip"
+                    class:conn-chip-relay={selected.connectPath === "relay"}
+                    class:conn-chip-p2p={selected.connectPath === "p2p"}
+                    title={connectPathTitle(selected)}
+                  >{connectPathLabel(selected)}</span>
+                {/if}
+              </span>
+            </div>
             <div class="device-top-sub">
               {#if isWebPeer(selected)}
                 {selected.browser || t("devices.browser")} · {peerEndpoint(selected)}
@@ -1437,10 +1486,52 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-wrap: wrap;
     gap: var(--space-2);
     font-size: var(--text-md);
     font-weight: 600;
     margin-top: var(--space-3);
+  }
+  .conn-chips {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  .conn-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    border: 1px solid transparent;
+  }
+  .conn-chip-local {
+    color: #6ec9ff;
+    background: rgba(58, 139, 255, 0.14);
+    border-color: rgba(58, 139, 255, 0.35);
+  }
+  .conn-chip-internet {
+    color: #c9a8ff;
+    background: rgba(156, 108, 255, 0.14);
+    border-color: rgba(156, 108, 255, 0.35);
+  }
+  .conn-chip-relay {
+    color: #ffc96e;
+    background: rgba(255, 168, 58, 0.12);
+    border-color: rgba(255, 168, 58, 0.35);
+  }
+  .conn-chip-p2p {
+    color: #7ee8b2;
+    background: rgba(61, 220, 132, 0.12);
+    border-color: rgba(61, 220, 132, 0.35);
   }
   .device-online {
     width: 9px;
@@ -1500,7 +1591,14 @@
     flex-shrink: 0;
   }
   .device-top-meta { display: flex; align-items: center; gap: var(--space-3); min-width: 0; flex: 1; }
-  .device-top-name { font-size: var(--text-md); font-weight: 600; }
+  .device-top-name {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    font-size: var(--text-md);
+    font-weight: 600;
+  }
   .device-top-sub { font-size: var(--text-sm); color: var(--color-text-faint); }
 
   .transfer-stack {

@@ -15,6 +15,10 @@ const ru: Record<MessageKey, string> = {
   "devices.thisDevice": "это устройство",
   "devices.fingerprint": "отпечаток",
   "devices.browser": "Браузер",
+  "connect.local": "Локальная сеть",
+  "connect.internet": "Интернет (приглашение)",
+  "connect.relay": "Через relay-сервер",
+  "connect.p2p": "Прямой P2P",
 
   "drop.overlay": "Отпустите, чтобы добавить файлы",
   "drop.tileHint": "Отпустите для отправки",

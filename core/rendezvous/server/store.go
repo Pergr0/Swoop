@@ -20,12 +20,16 @@ type hostRecord struct {
 }
 
 type joinerRecord struct {
-	peerID      string
-	punchPort   int
-	lanAddr     string
-	reflexiveIP string
-	joinedAt    time.Time
-	seenByHost  bool
+	peerID       string
+	punchPort    int
+	lanAddr      string
+	reflexiveIP  string
+	deviceName   string
+	fingerprint  string
+	controlPort  int
+	capabilities []string
+	joinedAt     time.Time
+	seenByHost   bool
 }
 
 type room struct {
@@ -67,7 +71,7 @@ func (s *Store) RegisterHost(sessionID, peerID, deviceName, lanAddr, reachAddr, 
 	}
 }
 
-func (s *Store) Join(sessionID, peerID, lanAddr, reflexiveIP string, punchPort int) (*room, bool) {
+func (s *Store) Join(sessionID, peerID, lanAddr, reflexiveIP, deviceName, fingerprint string, punchPort, controlPort int, capabilities []string) (*room, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reapLocked()
@@ -77,7 +81,8 @@ func (s *Store) Join(sessionID, peerID, lanAddr, reflexiveIP string, punchPort i
 	}
 	r.joiner = &joinerRecord{
 		peerID: peerID, punchPort: punchPort, lanAddr: lanAddr,
-		reflexiveIP: reflexiveIP, joinedAt: time.Now(),
+		reflexiveIP: reflexiveIP, deviceName: deviceName, fingerprint: fingerprint,
+		controlPort: controlPort, capabilities: capabilities, joinedAt: time.Now(),
 	}
 	if s.logf != nil {
 		s.logf("event=join session=%s host=%s joiner=%s joiner_reflexive=%s joiner_punch=%d",
