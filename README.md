@@ -1,8 +1,6 @@
 # Swoop
 
-Zero-config file transfer on the **local network** and **over the internet**
-(Windows, macOS, Linux). Phones and tablets work via mobile browser — no
-accounts, no manual port forwarding.
+Zero-config LAN and internet file transfer for Windows, macOS, and Linux. Phones via browser. No cloud accounts.
 
 > **Quick start (Russian):** [docs/USAGE.md](docs/USAGE.md)
 
