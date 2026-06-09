@@ -1,12 +1,14 @@
 # Swoop
 
-Zero-config LAN file transfer (Windows, macOS, Linux). Phones and tablets work via mobile browser — no cloud, no setup.
+Zero-config file transfer on the **local network** and **over the internet**
+(Windows, macOS, Linux). Phones and tablets work via mobile browser — no
+accounts, no manual port forwarding.
 
 > **Quick start (Russian):** [docs/USAGE.md](docs/USAGE.md)
 
 ## How to use
 
-### Desktop ↔ desktop
+### Desktop ↔ desktop (LAN)
 
 1. Launch Swoop and pick a network interface (Wi‑Fi / Ethernet).
 2. Click a device tile in the grid.
@@ -14,6 +16,37 @@ Zero-config LAN file transfer (Windows, macOS, Linux). Phones and tablets work v
 4. The receiver accepts or declines in the incoming-offer dialog. Files land in
    the OS **Downloads** folder.
 5. Optional: expand **Messages** under the drop zone for short text/links.
+
+LAN peers stay visible while discovery packets arrive (~every 3 s). There is no
+idle timeout — only the usual “device went offline” when it leaves the network or
+closes the app.
+
+### Desktop ↔ desktop (internet)
+
+For two machines in different places (no shared Wi‑Fi), use a signed
+**SwoopInvite** — the same files and chat as on LAN, routed through a small
+rendezvous/relay for signaling (with optional direct P2P upgrade when NAT allows).
+
+| Step | Host (creates invite) | Joiner (imports invite) |
+|------|------------------------|-------------------------|
+| 1 | On the self-card, open **Connect over the internet** (globe). | **Import invite** — pick the `.swoopinvite` file or a QR image. |
+| 2 | Share the QR or invite file out-of-band (messengers, email). | Accept the invite before it expires. |
+| 3 | When the joiner appears in the grid, send files or chat as on LAN. | Same — drag, **Send**, **Messages**. |
+
+**Timers**
+
+- **15 minutes** — invite window: both sides must finish pairing in this time,
+  or the host must create a new invite.
+- **20 minutes idle** — after pairing, if there is no chat and no active file
+  transfer (including waiting for Accept), both sides send goodbye and the tile
+  disappears. Long transfers are not cut off — the idle timer pauses until the
+  transfer ends.
+
+**Tile badges** (subtitle on each device): **L** = local LAN, **I** = internet
+invite; for internet peers also **R** (relay) or **P2P** (direct QUIC when
+upgrade succeeds). Compare the fingerprint on first connect (TOFU).
+
+Internet pairing is desktop-only today; the mobile browser path remains LAN-only.
 
 ### Phone / tablet (browser)
 
@@ -65,7 +98,10 @@ and the UI is just one client of it.
 - `core/protocol` — wire types and constants (one source of truth)
 - `core/identity` — device id + self-signed TLS cert + fingerprint (TOFU trust)
 - `core/discovery` — peer discovery via UDP multicast on all interfaces
-- `core/transport` — control plane (HTTPS `/api/v1/...`: info, handshake)
+- `core/invite` + `core/pairing` — signed SwoopInvite blobs and paired-peer registry
+- `core/rendezvous` + `core/overlay` — internet signaling and invite-scoped relay
+  (optional QUIC P2P upgrade)
+- `core/transport` — control plane (HTTPS `/api/v1/...`: info, handshake, goodbye)
 - `core/transfer` — data plane (parallel TCP streams; HTTP upload/pull for web)
 - `core/webui` — embedded mobile browser page
 - `app.go` / `frontend/` — Wails desktop UI
@@ -147,6 +183,16 @@ rm -rf frontend/node_modules && bash scripts/build.sh
 
 **Phone cannot connect** — same Wi‑Fi, accept the HTTPS certificate warning,
 allow port **53317** through the desktop firewall.
+
+**Internet invite expired** — create a new invite on the host; joiner must import
+within **15 minutes**.
+
+**Internet peer disappeared** — idle timeout (**20 minutes** without chat or
+transfer), app closed, or network loss. Re-pair with a fresh invite.
+
+**Internet transfer slow or stuck on relay** — badge **R** means traffic goes
+through the relay; **P2P** means a direct path was negotiated. Some NAT setups
+stay on relay only.
 
 **Diagnostics log** — the engine writes `swoop.log` under the app data folder
 (same place as device identity):
