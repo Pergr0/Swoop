@@ -1,4 +1,5 @@
 build/bin
+build/release
 build/build.log
 dist/
 build/windows/icon.ico

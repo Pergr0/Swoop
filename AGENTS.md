@@ -87,6 +87,9 @@ Rendezvous VPS: `make build-server` (or `scripts/build-server.sh`) produces
 `build/deploy/` (`swoop-rendezvous`, `install.sh`, `swoop-rendezvous.service`).
 Copy to the VPS and run `sudo ./install.sh` — installs to `/opt/swoop/`,
 enables `swoop-rendezvous.service`, logs to `/var/log/swoop/rendezvous.log`.
+Release packaging: `make package-release` or `scripts/package-release.ps1`
+(Windows) / `scripts/package-release.sh` — zips/tars `build/bin/` into
+`build/release/` with `SHA256SUMS` for GitHub Releases upload.
 
 Note: testing discovery needs TWO machines on the same LAN; two instances on one
 host won't see each other (shared identity + control port).
