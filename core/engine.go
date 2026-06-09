@@ -28,6 +28,7 @@ import (
 	"swoop/core/invite"
 	"swoop/core/nat"
 	"swoop/core/netif"
+	"swoop/core/overlay"
 	"swoop/core/pairing"
 	"swoop/core/paths"
 	"swoop/core/rendezvous"
@@ -84,6 +85,12 @@ type Engine struct {
 	inviteHostCancel context.CancelFunc
 	inviteNATRelease func()
 	invitePunchConn  *net.UDPConn
+	inviteOverlay    *overlay.Link
+
+	overlayMu sync.Mutex
+	overlays  map[string]*overlay.Link
+	punchMu   sync.Mutex
+	punchConn map[string]*net.UDPConn // joiner punch sockets for overlay upgrade
 
 	closeOnce sync.Once
 }
@@ -110,6 +117,9 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{id: id, downloadsDir: dl, logger: lg, logPath: logPath, logFile: logFile}
 	e.mgr = transfer.NewManager(e.Self, dl)
 	e.mgr.SetLogf(e.logf)
+	e.mgr.SetOverlayFor(func(peerID string) transfer.OverlayTunnel {
+		return e.overlayForPeer(peerID)
+	})
 
 	e.chatLim = newRateLimiter(30, 10*time.Second)
 	e.readByPeer = make(map[string]int64)
@@ -306,13 +316,23 @@ func (e *Engine) SendMessage(deviceID, text string) error {
 		return i18n.ErrPeerNoFingerprint(peer.Name)
 	}
 	if peer.Address == "" || peer.ControlPort == 0 {
-		return i18n.ErrPeerNoAddress(peer.Name)
+		if e.overlayForPeer(deviceID) == nil {
+			return i18n.ErrPeerNoAddress(peer.Name)
+		}
 	}
 
 	body, _ := json.Marshal(protocol.ChatMessage{Sender: e.Self(), Text: text, Ts: ts})
-	client := transport.NewPinnedClient(peer.Fingerprint, 10*time.Second)
-	url := "https://" + net.JoinHostPort(peer.Address, strconv.Itoa(peer.ControlPort)) + "/api/v1/message"
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
+	var resp *http.Response
+	var err error
+	if link := e.overlayForPeer(deviceID); link != nil {
+		client := link.HTTPClient(peer.Fingerprint, 10*time.Second)
+		url := "https://overlay/api/v1/message"
+		resp, err = client.Post(url, "application/json", bytes.NewReader(body))
+	} else {
+		client := transport.NewPinnedClient(peer.Fingerprint, 10*time.Second)
+		url := "https://" + net.JoinHostPort(peer.Address, strconv.Itoa(peer.ControlPort)) + "/api/v1/message"
+		resp, err = client.Post(url, "application/json", bytes.NewReader(body))
+	}
 	if err != nil {
 		e.logf("chat send to %s failed: %v", peer.Name, err)
 		return i18n.ErrChatSend(err)
@@ -692,6 +712,7 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 		e.webPresence.OnChange(func([]protocol.DeviceInfo) { e.emitPeers() })
 	}
 	e.paired.OnProbe(e.probePairedPeer)
+	e.paired.OnRemove(func(id string) { e.removeOverlay(id) })
 	go e.paired.Start(runCtx)
 	go e.webPresence.Start(runCtx)
 	if err := e.disco.Start(runCtx); err != nil {
@@ -825,6 +846,35 @@ func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punch
 		e.logf("rendezvous: session registered (signaling only)")
 	}
 
+	go func() {
+		reachAddr := ""
+		if reach != nil {
+			reachAddr = reach.Addr
+		}
+		link, err := overlay.ServeHost(ctx, overlay.HostParams{
+			SessionID:   sessionID,
+			PeerID:      self.ID,
+			ControlPort: e.server.Port(),
+			DataPort:    e.mgr.DataPort(),
+			HostCert:    e.id.Certificate,
+			ReachAddr:   reachAddr,
+			LanAddr:     self.Address,
+			PunchPort:   punchPort,
+			PunchConn:   punchConn,
+			Logf:        e.logf,
+		})
+		if err != nil {
+			e.logf("overlay host: %v", err)
+			return
+		}
+		e.inviteHostMu.Lock()
+		e.inviteOverlay = link
+		e.inviteHostMu.Unlock()
+		e.logf("overlay: host relay tunnel ready")
+		<-ctx.Done()
+		_ = link.Close()
+	}()
+
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -851,9 +901,11 @@ func (e *Engine) stopInviteHost() {
 	cancel := e.inviteHostCancel
 	conn := e.invitePunchConn
 	release := e.inviteNATRelease
+	ol := e.inviteOverlay
 	e.inviteHostCancel = nil
 	e.invitePunchConn = nil
 	e.inviteNATRelease = nil
+	e.inviteOverlay = nil
 	e.inviteHostMu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -864,6 +916,57 @@ func (e *Engine) stopInviteHost() {
 	if release != nil {
 		release()
 	}
+	if ol != nil {
+		_ = ol.Close()
+	}
+}
+
+func (e *Engine) setOverlay(peerID string, link *overlay.Link, punch *net.UDPConn) {
+	e.overlayMu.Lock()
+	if e.overlays == nil {
+		e.overlays = make(map[string]*overlay.Link)
+	}
+	if old := e.overlays[peerID]; old != nil {
+		_ = old.Close()
+	}
+	e.overlays[peerID] = link
+	e.overlayMu.Unlock()
+	if punch != nil {
+		e.punchMu.Lock()
+		if e.punchConn == nil {
+			e.punchConn = make(map[string]*net.UDPConn)
+		}
+		if old := e.punchConn[peerID]; old != nil && old != punch {
+			_ = old.Close()
+		}
+		e.punchConn[peerID] = punch
+		e.punchMu.Unlock()
+	}
+}
+
+func (e *Engine) overlayForPeer(peerID string) *overlay.Link {
+	e.overlayMu.Lock()
+	defer e.overlayMu.Unlock()
+	if e.overlays == nil {
+		return nil
+	}
+	return e.overlays[peerID]
+}
+
+func (e *Engine) removeOverlay(peerID string) {
+	e.overlayMu.Lock()
+	link := e.overlays[peerID]
+	delete(e.overlays, peerID)
+	e.overlayMu.Unlock()
+	if link != nil {
+		_ = link.Close()
+	}
+	e.punchMu.Lock()
+	if pc := e.punchConn[peerID]; pc != nil {
+		_ = pc.Close()
+		delete(e.punchConn, peerID)
+	}
+	e.punchMu.Unlock()
 }
 
 func (e *Engine) expireInviteHost(expiresAt int64) {
@@ -911,25 +1014,86 @@ func (e *Engine) probePairedPeer(id string) {
 	}
 	peer, ok := e.paired.Get(id)
 	if !ok {
+		e.removeOverlay(id)
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	inv, hasInv := e.paired.InviteMeta(id)
-	var punchConn *net.UDPConn
 	if hasInv && rendezvous.Enabled() {
-		inv, peer, punchConn = e.rendezvousJoin(ctx, inv, peer, id)
-	} else if p, ok := e.paired.Get(id); ok {
-		peer = p
+		if e.overlayForPeer(id) == nil {
+			var joinerReflexive string
+			var punchConn *net.UDPConn
+			inv, peer, punchConn, joinerReflexive = e.rendezvousJoin(ctx, inv, peer, id)
+			if punchConn != nil && inv.PunchPort > 0 {
+				if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID, punchConn); err != nil {
+					e.logf("paired peer %q punch: %v", peer.Name, err)
+				}
+			}
+			link, err := overlay.ConnectJoinerRetry(ctx, inv.SessionID, e.id.DeviceID)
+			if err != nil {
+				if punchConn != nil {
+					_ = punchConn.Close()
+				}
+				e.logf("paired peer %q overlay: %v", peer.Name, err)
+				e.paired.SetStatus(id, pairing.StatusError)
+				e.emitPeers()
+				return
+			}
+			e.setOverlay(id, link, punchConn)
+			e.logf("overlay: tunnel to %q ready (%s)", peer.Name, link.Mode())
+			joinerPunch := 0
+			if punchConn != nil {
+				if a, ok := punchConn.LocalAddr().(*net.UDPAddr); ok {
+					joinerPunch = a.Port
+				}
+			}
+			reachAddr := inv.ReachAddr
+			if reachAddr == "" {
+				reachAddr = inv.Device.Address
+			}
+			link.StartUpgrade(context.Background(), overlay.UpgradeParams{
+				SessionID:       inv.SessionID,
+				Fingerprint:     peer.Fingerprint,
+				ReachAddr:       reachAddr,
+				LanAddr:         inv.Device.Address,
+				HostPunchPort:   inv.PunchPort,
+				JoinerPunchPort: joinerPunch,
+				JoinerReflexive: joinerReflexive,
+				PunchConn:       punchConn,
+				Logf:            e.logf,
+			})
+		}
+		if link := e.overlayForPeer(id); link != nil {
+			live, err := link.ProbeInfo(ctx, peer)
+			if err != nil {
+				e.logf("paired peer %q overlay probe: %v", peer.Name, err)
+				e.paired.SetStatus(id, pairing.StatusError)
+				e.emitPeers()
+				return
+			}
+			live.Paired = true
+			e.paired.Update(id, live)
+			e.emitPeers()
+			if link.Mode() == "direct" {
+				e.logf("paired peer %q using direct QUIC P2P", peer.Name)
+			}
+			return
+		}
+	}
+
+	// Fallback: direct TCP when overlay unavailable (LAN / UPnP).
+	var punchConn *net.UDPConn
+	if hasInv && inv.PunchPort > 0 {
+		var err error
+		punchConn, _, err = pairing.ListenPunchUDP()
+		if err == nil {
+			_ = pairing.ClientPunch(ctx, inv, e.id.DeviceID, punchConn)
+		}
 	}
 	if punchConn != nil {
 		defer punchConn.Close()
-	}
-	if hasInv && inv.PunchPort > 0 {
-		if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID, punchConn); err != nil {
-			e.logf("paired peer %q punch: %v (host UDP %d must be reachable; inviter must keep invite open)", peer.Name, err, inv.PunchPort)
-		}
 	}
 	live, err := pairing.ProbeInfo(ctx, peer)
 	if err != nil {
@@ -942,10 +1106,10 @@ func (e *Engine) probePairedPeer(id string) {
 	e.emitPeers()
 }
 
-func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer protocol.DeviceInfo, id string) (invite.Parsed, protocol.DeviceInfo, *net.UDPConn) {
+func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer protocol.DeviceInfo, id string) (invite.Parsed, protocol.DeviceInfo, *net.UDPConn, string) {
 	punchConn, punchPort, err := pairing.ListenPunchUDP()
 	if err != nil {
-		return inv, peer, nil
+		return inv, peer, nil, ""
 	}
 
 	client := rendezvous.NewClient()
@@ -958,7 +1122,7 @@ func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer pro
 	if err != nil {
 		e.logf("rendezvous join: %v", err)
 		punchConn.Close()
-		return inv, peer, nil
+		return inv, peer, nil, ""
 	}
 	e.logf("rendezvous: joined session, host reflexive %s (local punch UDP %d)", host.ReflexiveAddr, punchPort)
 	if host.ReachAddr == "" && host.ReflexiveAddr == rendezvous.DefaultServerHost {
@@ -967,15 +1131,15 @@ func (e *Engine) rendezvousJoin(ctx context.Context, inv invite.Parsed, peer pro
 	inv = rendezvous.ApplyHostInfo(inv, host)
 	peer = inv.DialDevice()
 	if inv.HasReach() {
-		e.logf("paired peer %q: probing reach %s:%d punch host UDP %d", peer.Name, inv.ReachAddr, inv.ReachPort, inv.PunchPort)
+		e.logf("paired peer %q: reach %s:%d punch UDP %d", peer.Name, inv.ReachAddr, inv.ReachPort, inv.PunchPort)
 	} else {
-		e.logf("paired peer %q: no UPnP reach — probing reflexive %s:%d punch host UDP %d (needs router port-forward on inviter)", peer.Name, peer.Address, peer.ControlPort, inv.PunchPort)
+		e.logf("paired peer %q: reflexive %s:%d punch UDP %d", peer.Name, peer.Address, peer.ControlPort, inv.PunchPort)
 	}
 	peer.Paired = true
 	peer.PairStatus = pairing.StatusConnecting
 	e.paired.UpdateInvite(id, inv, peer)
 	e.emitPeers()
-	return inv, peer, punchConn
+	return inv, peer, punchConn, host.JoinerReflexive
 }
 
 // ImportInviteBytes parses a .swoopinvite file or invite PNG.

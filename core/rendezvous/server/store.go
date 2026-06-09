@@ -38,12 +38,13 @@ type room struct {
 type Store struct {
 	mu    sync.Mutex
 	rooms map[string]*room
+	relay *relayBridge
 	logf  func(string, ...any)
 }
 
 // NewStore creates an empty session store.
 func NewStore(logf func(string, ...any)) *Store {
-	return &Store{rooms: make(map[string]*room), logf: logf}
+	return &Store{rooms: make(map[string]*room), relay: newRelayBridge(logf), logf: logf}
 }
 
 func (s *Store) RegisterHost(sessionID, peerID, deviceName, lanAddr, reachAddr, reflexiveIP string, controlPort, punchPort, reachPort int) {
@@ -107,6 +108,9 @@ func (s *Store) reapLocked() {
 	now := time.Now()
 	for id, r := range s.rooms {
 		if now.After(r.host.expiresAt) {
+			if s.relay != nil {
+				s.relay.dropSession(id)
+			}
 			delete(s.rooms, id)
 		}
 	}

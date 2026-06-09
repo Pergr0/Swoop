@@ -64,43 +64,25 @@ func RunPunchHost(ctx context.Context, conn *net.UDPConn, sessionID string, logf
 	}
 }
 
-// ClientPunch sends UDP hellos to the inviter's punch port (public + LAN fallback).
-// When boundConn is non-nil it must already be bound to parsed.PunchPort (the port
-// registered with rendezvous) so the host reverse-punch reaches the same socket.
-func ClientPunch(ctx context.Context, parsed invite.Parsed, localPeerID string, boundConn *net.UDPConn) error {
-	if parsed.PunchPort <= 0 || parsed.SessionID == "" {
-		return nil
-	}
-	targets := punchTargets(parsed)
-	if len(targets) == 0 {
+// PunchAddrs sends UDP hellos to explicit targets until ACK or ctx deadline.
+func PunchAddrs(ctx context.Context, conn *net.UDPConn, sessionID, localPeerID string, targets []*net.UDPAddr) error {
+	if conn == nil || sessionID == "" || len(targets) == 0 {
 		return errors.New("no punch targets")
 	}
 	hello, err := json.Marshal(punchHello{
 		Magic:     punchMagic,
-		SessionID: parsed.SessionID,
+		SessionID: sessionID,
 		PeerID:    localPeerID,
 	})
 	if err != nil {
 		return err
 	}
-	conn := boundConn
-	if conn == nil {
-		var listenErr error
-		conn, listenErr = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
-		if listenErr != nil {
-			return listenErr
-		}
-		defer conn.Close()
-	}
-
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		deadline = time.Now().Add(6 * time.Second)
 	}
-
 	ackCh := make(chan struct{}, 1)
-	go readPunchAck(conn, parsed.SessionID, ackCh)
-
+	go readPunchAck(conn, sessionID, ackCh)
 	for time.Now().Before(deadline) {
 		for _, addr := range targets {
 			_, _ = conn.WriteToUDP(hello, addr)
@@ -114,6 +96,29 @@ func ClientPunch(ctx context.Context, parsed invite.Parsed, localPeerID string, 
 		}
 	}
 	return errors.New("punch timeout")
+}
+
+// ClientPunch sends UDP hellos to the inviter's punch port (public + LAN fallback).
+// When boundConn is non-nil it must already be bound to parsed.PunchPort (the port
+// registered with rendezvous) so the host reverse-punch reaches the same socket.
+func ClientPunch(ctx context.Context, parsed invite.Parsed, localPeerID string, boundConn *net.UDPConn) error {
+	if parsed.PunchPort <= 0 || parsed.SessionID == "" {
+		return nil
+	}
+	targets := punchTargets(parsed)
+	if len(targets) == 0 {
+		return errors.New("no punch targets")
+	}
+	conn := boundConn
+	if conn == nil {
+		var listenErr error
+		conn, listenErr = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+		if listenErr != nil {
+			return listenErr
+		}
+		defer conn.Close()
+	}
+	return PunchAddrs(ctx, conn, parsed.SessionID, localPeerID, targets)
 }
 
 func punchTargets(parsed invite.Parsed) []*net.UDPAddr {

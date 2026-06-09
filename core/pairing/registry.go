@@ -34,6 +34,7 @@ type Registry struct {
 	order    []string
 	onChange func([]protocol.DeviceInfo)
 	onProbe  func(id string) // called on interval and after add
+	onRemove func(id string)
 }
 
 // New creates an empty paired-peer registry.
@@ -46,6 +47,9 @@ func (r *Registry) OnChange(fn func([]protocol.DeviceInfo)) { r.onChange = fn }
 
 // OnProbe registers a callback to re-check reachability (engine provides TLS /info probe).
 func (r *Registry) OnProbe(fn func(id string)) { r.onProbe = fn }
+
+// OnRemove registers a callback when a paired peer is reaped or replaced.
+func (r *Registry) OnRemove(fn func(id string)) { r.onRemove = fn }
 
 // Add records a verified invite peer. Replaces an existing entry with the same ID.
 func (r *Registry) Add(device protocol.DeviceInfo, inv invite.Parsed) {
@@ -206,6 +210,9 @@ func (r *Registry) reap() {
 			delete(r.peers, id)
 			r.order = removeID(r.order, id)
 			changed = true
+			if r.onRemove != nil {
+				r.onRemove(id)
+			}
 		}
 	}
 	r.mu.Unlock()

@@ -30,6 +30,7 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/v1/rendezvous/host", s.handleHost)
 	mux.HandleFunc("/api/v1/rendezvous/join", s.handleJoin)
 	mux.HandleFunc("/api/v1/rendezvous/poll", s.handlePoll)
+	mux.HandleFunc("/api/v1/overlay/connect", s.handleOverlayConnect)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -41,7 +42,7 @@ func (s *Server) ListenAndServe() error {
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,
 	}
-	log.Printf("swoop-rendezvous listening on %s (signaling only)", s.Addr)
+	log.Printf("swoop-rendezvous listening on %s (signaling + invite-scoped overlay relay)", s.Addr)
 	return srv.ListenAndServe()
 }
 

@@ -1,5 +1,5 @@
 // swoop-rendezvous is a minimal signaling server for internet P2P pairing.
-// It never relays file data — only helps peers discover endpoints for hole punching.
+// It relays overlay bytes only while an active invite session exists (no file store).
 //
 // Build (Linux): scripts/build-server.sh
 package main

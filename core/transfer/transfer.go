@@ -104,6 +104,19 @@ type Manager struct {
 	logf       func(string, ...any)
 
 	webVerify func(clientID, remoteAddr, webToken string) bool
+
+	overlayFor func(peerID string) OverlayTunnel
+}
+
+// OverlayTunnel carries invite-scoped control HTTP and data streams to a paired peer.
+type OverlayTunnel interface {
+	DoControl(ctx context.Context, method, path string, body io.Reader, contentType, fingerprint string) (*http.Response, error)
+	DialData(ctx context.Context, token string) (net.Conn, error)
+}
+
+// SetOverlayFor returns an overlay tunnel for invite-paired peers (if connected).
+func (m *Manager) SetOverlayFor(fn func(peerID string) OverlayTunnel) {
+	m.overlayFor = fn
 }
 
 // SetWebVerifier installs browser client HMAC verification for HTTP pull APIs.
@@ -821,6 +834,18 @@ func (m *Manager) runSendWorkers(sess *sendSession, resp protocol.PrepareUploadR
 }
 
 func (m *Manager) openSendConn(sess *sendSession, resp protocol.PrepareUploadResponse) (net.Conn, error) {
+	if m.overlayFor != nil {
+		if tun := m.overlayFor(sess.peer.ID); tun != nil {
+			conn, err := tun.DialData(context.Background(), resp.Token)
+			if err != nil {
+				m.logf("send to %s: overlay data dial failed: %v", sess.peer.Name, err)
+				sess.setErr(err)
+				return nil, err
+			}
+			sess.addConn(conn)
+			return conn, nil
+		}
+	}
 	conn, err := net.Dial("tcp", net.JoinHostPort(sess.peer.Address, strconv.Itoa(resp.DataPort)))
 	if err != nil {
 		m.logf("send to %s: data dial failed: %v", sess.peer.Name, err)
@@ -941,6 +966,20 @@ func (cw *countingWriter) Write(p []byte) (int, error) {
 
 func (m *Manager) postPrepare(ctx context.Context, peer protocol.DeviceInfo, files []protocol.FileMeta) (protocol.PrepareUploadResponse, int, error) {
 	body, _ := json.Marshal(protocol.PrepareUploadRequest{Sender: m.self(), Files: files})
+	if m.overlayFor != nil {
+		if tun := m.overlayFor(peer.ID); tun != nil {
+			resp, err := tun.DoControl(ctx, http.MethodPost, "/api/v1/prepare-upload", strings.NewReader(string(body)), "application/json", peer.Fingerprint)
+			if err != nil {
+				return protocol.PrepareUploadResponse{}, 0, err
+			}
+			defer resp.Body.Close()
+			var out protocol.PrepareUploadResponse
+			if resp.StatusCode == http.StatusOK {
+				_ = json.NewDecoder(resp.Body).Decode(&out)
+			}
+			return out, resp.StatusCode, nil
+		}
+	}
 	client := &http.Client{
 		Timeout: acceptTimeout + 10*time.Second,
 		Transport: &http.Transport{
