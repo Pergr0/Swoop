@@ -542,9 +542,15 @@ func dialRelay(ctx context.Context, sessionID, role, peerID string) (*websocket.
 	d := websocket.Dialer{HandshakeTimeout: connectTimeout}
 	ws, resp, err := d.DialContext(ctx, url, nil)
 	if err != nil {
-		if resp != nil && resp.Body != nil {
-			_, _ = io.ReadAll(io.LimitReader(resp.Body, 256))
-			_ = resp.Body.Close()
+		if resp != nil {
+			if resp.Body != nil {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+				_ = resp.Body.Close()
+				if len(body) > 0 {
+					return nil, fmt.Errorf("overlay dial HTTP %d: %s", resp.StatusCode, string(body))
+				}
+			}
+			return nil, fmt.Errorf("overlay dial HTTP %d: %w", resp.StatusCode, err)
 		}
 		return nil, err
 	}

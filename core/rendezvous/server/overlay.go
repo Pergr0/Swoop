@@ -64,11 +64,17 @@ func (b *relayBridge) attach(sessionID, role string, ws *websocket.Conn) {
 			_ = room.host.Close()
 		}
 		room.host = ws
+		if b.logf != nil {
+			b.logf("event=overlay_attach session=%s role=host", sessionID)
+		}
 	case "joiner":
 		if room.joiner != nil {
 			_ = room.joiner.Close()
 		}
 		room.joiner = ws
+		if b.logf != nil {
+			b.logf("event=overlay_attach session=%s role=joiner", sessionID)
+		}
 	}
 	startBridge := room.host != nil && room.joiner != nil
 	host, joiner := room.host, room.joiner

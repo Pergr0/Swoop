@@ -1026,11 +1026,8 @@ func (e *Engine) probePairedPeer(id string) {
 			var joinerReflexive string
 			var punchConn *net.UDPConn
 			inv, peer, punchConn, joinerReflexive = e.rendezvousJoin(ctx, inv, peer, id)
-			if punchConn != nil && inv.PunchPort > 0 {
-				if err := pairing.ClientPunch(ctx, inv, e.id.DeviceID, punchConn); err != nil {
-					e.logf("paired peer %q punch: %v", peer.Name, err)
-				}
-			}
+			// Connect overlay relay before punch: ClientPunch uses the same ctx and
+			// can burn the full deadline, leaving no time for the WebSocket tunnel.
 			link, err := overlay.ConnectJoinerRetry(ctx, inv.SessionID, e.id.DeviceID)
 			if err != nil {
 				if punchConn != nil {

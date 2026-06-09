@@ -35,12 +35,12 @@ func (s *Server) ListenAndServe() error {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
+	// No ReadTimeout/WriteTimeout: overlay relay uses long-lived WebSocket bridges
+	// for the full invite session (up to 15 minutes).
 	srv := &http.Server{
 		Addr:              s.Addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
 	}
 	log.Printf("swoop-rendezvous listening on %s (signaling + invite-scoped overlay relay)", s.Addr)
 	return srv.ListenAndServe()
