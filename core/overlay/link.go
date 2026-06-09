@@ -69,6 +69,8 @@ type Link struct {
 	logf         func(string, ...any)
 	p2pNote      string
 	onModeChange func()
+	relayLost    chan struct{}
+	relayLostOnce sync.Once
 }
 
 func (l *Link) activeMux() *yamux.Session {
@@ -124,7 +126,7 @@ func ConnectJoiner(ctx context.Context, sessionID, peerID string) (*Link, error)
 		_ = ws.Close()
 		return nil, err
 	}
-	return &Link{relayMux: mux, closed: make(chan struct{})}, nil
+	return &Link{relayMux: mux, closed: make(chan struct{}), relayLost: make(chan struct{})}, nil
 }
 
 // ConnectJoinerRetry waits for host relay and retries.
@@ -162,6 +164,7 @@ func ServeHost(ctx context.Context, p HostParams) (*Link, error) {
 	link := &Link{
 		relayMux:    mux,
 		closed:      make(chan struct{}),
+		relayLost:   make(chan struct{}),
 		hostCert:    p.HostCert,
 		reach:       p.ReachAddr,
 		lan:         p.LanAddr,
@@ -186,8 +189,60 @@ func ServeHost(ctx context.Context, p HostParams) (*Link, error) {
 		}
 		go link.runQUICListener(ctx)
 	}
-	go link.serveRelayInbound(ctx)
+	link.startRelayInbound(ctx)
 	return link, nil
+}
+
+func (l *Link) startRelayInbound(ctx context.Context) {
+	if l.relayLost == nil {
+		l.relayLost = make(chan struct{})
+	}
+	go func() {
+		l.serveRelayInbound(ctx)
+		l.signalRelayLost()
+	}()
+}
+
+func (l *Link) signalRelayLost() {
+	l.relayLostOnce.Do(func() {
+		if l.relayLost != nil {
+			close(l.relayLost)
+		}
+	})
+}
+
+// RelayAlive reports whether the overlay tunnel can carry traffic.
+func (l *Link) RelayAlive() bool {
+	if l == nil {
+		return false
+	}
+	select {
+	case <-l.relayLost:
+		l.mu.RLock()
+		alive := l.directMux != nil
+		l.mu.RUnlock()
+		return alive
+	default:
+	}
+	l.mu.RLock()
+	alive := l.relayMux != nil || l.directMux != nil
+	l.mu.RUnlock()
+	return alive
+}
+
+// WaitRelayDown blocks until the relay WebSocket session ends or ctx is canceled.
+func (l *Link) WaitRelayDown(ctx context.Context) error {
+	if l == nil || l.relayLost == nil {
+		return errors.New("no relay")
+	}
+	select {
+	case <-l.relayLost:
+		return errors.New("relay down")
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-l.closed:
+		return errors.New("closed")
+	}
 }
 
 // StartJoinerRelay accepts inbound overlay streams from the invite host and proxies
@@ -197,7 +252,7 @@ func (l *Link) StartJoinerRelay(ctx context.Context, controlPort, dataPort int) 
 	l.controlPort = controlPort
 	l.dataPort = dataPort
 	l.mu.Unlock()
-	go l.serveRelayInbound(ctx)
+	l.startRelayInbound(ctx)
 }
 
 func (l *Link) runQUICListener(ctx context.Context) {

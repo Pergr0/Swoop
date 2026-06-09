@@ -9,15 +9,42 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const wsPingInterval = 25 * time.Second
+
 // wsConn adapts a WebSocket to net.Conn for yamux.
 type wsConn struct {
-	conn *websocket.Conn
-	r    io.Reader
-	mu   sync.Mutex
+	conn   *websocket.Conn
+	r      io.Reader
+	mu     sync.Mutex
+	closed chan struct{}
 }
 
 func newWSConn(conn *websocket.Conn) *wsConn {
-	return &wsConn{conn: conn}
+	c := &wsConn{conn: conn, closed: make(chan struct{})}
+	_ = conn.SetReadDeadline(time.Now().Add(3 * wsPingInterval))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(3 * wsPingInterval))
+	})
+	go c.pingLoop()
+	return c
+}
+
+func (c *wsConn) pingLoop() {
+	ticker := time.NewTicker(wsPingInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.closed:
+			return
+		case <-ticker.C:
+			c.mu.Lock()
+			err := c.conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+			c.mu.Unlock()
+			if err != nil {
+				return
+			}
+		}
+	}
 }
 
 func (c *wsConn) Read(p []byte) (int, error) {
@@ -49,6 +76,11 @@ func (c *wsConn) Write(p []byte) (int, error) {
 }
 
 func (c *wsConn) Close() error {
+	select {
+	case <-c.closed:
+	default:
+		close(c.closed)
+	}
 	return c.conn.Close()
 }
 

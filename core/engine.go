@@ -1076,47 +1076,7 @@ func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punch
 		e.logf("rendezvous: session registered (signaling only)")
 	}
 
-	go func() {
-		reachAddr := ""
-		if reach != nil {
-			reachAddr = reach.Addr
-		}
-		link, err := overlay.ServeHost(ctx, overlay.HostParams{
-			SessionID:   sessionID,
-			PeerID:      self.ID,
-			ControlPort: e.server.Port(),
-			DataPort:    e.mgr.DataPort(),
-			HostCert:    e.id.Certificate,
-			ReachAddr:   reachAddr,
-			LanAddr:     self.Address,
-			PunchPort:   punchPort,
-			PunchConn:   punchConn,
-			OnQuicBound: func(quicPort int) {
-				if quicPort <= 0 {
-					return
-				}
-				mapCtx, mapCancel := context.WithTimeout(context.Background(), 6*time.Second)
-				defer mapCancel()
-				if rel, ok := nat.TryMapUDPPort(mapCtx, quicPort, e.logf); ok {
-					e.inviteHostMu.Lock()
-					e.inviteQuicRelease = rel
-					e.inviteHostMu.Unlock()
-				}
-			},
-			Logf: e.logf,
-		})
-		if err != nil {
-			e.logf("overlay host: %v", err)
-			return
-		}
-		e.wireOverlayLink(link)
-		e.inviteHostMu.Lock()
-		e.inviteOverlay = link
-		e.inviteHostMu.Unlock()
-		e.logf("overlay: host relay tunnel ready")
-		<-ctx.Done()
-		_ = link.Close()
-	}()
+	go e.runInviteHostOverlayLoop(ctx, sessionID, self, punchConn, punchPort, reach)
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -1139,6 +1099,90 @@ func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punch
 }
 
 func clientTimeout() time.Duration { return 8 * time.Second }
+
+func (e *Engine) runInviteHostOverlayLoop(ctx context.Context, sessionID string, self protocol.DeviceInfo, punchConn *net.UDPConn, punchPort int, reach *invite.Reach) {
+	reachAddr := ""
+	if reach != nil {
+		reachAddr = reach.Addr
+	}
+	quicRelease := func() {
+		e.inviteHostMu.Lock()
+		release := e.inviteQuicRelease
+		e.inviteQuicRelease = nil
+		e.inviteHostMu.Unlock()
+		if release != nil {
+			release()
+		}
+	}
+	for ctx.Err() == nil {
+		link, err := overlay.ServeHost(ctx, overlay.HostParams{
+			SessionID:   sessionID,
+			PeerID:      self.ID,
+			ControlPort: e.server.Port(),
+			DataPort:    e.mgr.DataPort(),
+			HostCert:    e.id.Certificate,
+			ReachAddr:   reachAddr,
+			LanAddr:     self.Address,
+			PunchPort:   punchPort,
+			PunchConn:   punchConn,
+			OnQuicBound: func(quicPort int) {
+				if quicPort <= 0 {
+					return
+				}
+				quicRelease()
+				mapCtx, mapCancel := context.WithTimeout(context.Background(), 6*time.Second)
+				defer mapCancel()
+				if rel, ok := nat.TryMapUDPPort(mapCtx, quicPort, e.logf); ok {
+					e.inviteHostMu.Lock()
+					e.inviteQuicRelease = rel
+					e.inviteHostMu.Unlock()
+				}
+			},
+			Logf: e.logf,
+		})
+		if err != nil {
+			e.logf("overlay host: %v (retry in 2s)", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
+		e.wireOverlayLink(link)
+		e.inviteHostMu.Lock()
+		old := e.inviteOverlay
+		e.inviteOverlay = link
+		e.inviteHostMu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
+		e.logf("overlay: host relay tunnel ready")
+		if err := link.WaitRelayDown(ctx); err != nil && ctx.Err() == nil {
+			if link.Mode() == "direct" {
+				e.logf("overlay: host on direct P2P (relay socket closed)")
+				<-ctx.Done()
+				_ = link.Close()
+				return
+			}
+			e.logf("overlay: host relay lost (%v), reconnecting", err)
+		}
+		_ = link.Close()
+		e.inviteHostMu.Lock()
+		if e.inviteOverlay == link {
+			e.inviteOverlay = nil
+		}
+		e.inviteHostMu.Unlock()
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Second):
+		}
+	}
+}
 
 func (e *Engine) stopInviteHost() {
 	e.inviteHostMu.Lock()
@@ -1276,6 +1320,66 @@ func (e *Engine) PairFromInvite(parsed invite.Parsed) error {
 	return nil
 }
 
+func (e *Engine) probeOverOverlay(ctx context.Context, id string, inv invite.Parsed, peer protocol.DeviceInfo, hostSide bool, link *overlay.Link) (protocol.DeviceInfo, error) {
+	live, err := link.ProbeInfo(ctx, peer)
+	if err == nil {
+		return live, nil
+	}
+	if hostSide {
+		e.refreshHostOverlayForProbe(ctx, inv.SessionID)
+	} else {
+		e.reconnectJoinerOverlay(ctx, id, inv)
+	}
+	link = e.overlayForPeer(id)
+	if link == nil || !link.RelayAlive() {
+		return protocol.DeviceInfo{}, err
+	}
+	return link.ProbeInfo(ctx, peer)
+}
+
+func (e *Engine) refreshHostOverlayForProbe(ctx context.Context, sessionID string) {
+	e.inviteHostMu.Lock()
+	ol := e.inviteOverlay
+	alive := ol != nil && ol.RelayAlive()
+	e.inviteHostMu.Unlock()
+	if alive {
+		return
+	}
+	e.logf("overlay: host relay stale before probe, waiting for reconnect")
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		e.inviteHostMu.Lock()
+		ol = e.inviteOverlay
+		alive = ol != nil && ol.RelayAlive()
+		e.inviteHostMu.Unlock()
+		if alive {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(400 * time.Millisecond):
+		}
+	}
+	_ = sessionID
+}
+
+func (e *Engine) reconnectJoinerOverlay(ctx context.Context, id string, inv invite.Parsed) {
+	e.logf("overlay: reconnecting joiner relay to %q", inv.SessionID[:8])
+	e.removeOverlay(id)
+	link, err := overlay.ConnectJoinerRetry(ctx, inv.SessionID, e.id.DeviceID)
+	if err != nil {
+		e.logf("overlay reconnect: %v", err)
+		return
+	}
+	e.punchMu.Lock()
+	punch := e.punchConn[id]
+	e.punchMu.Unlock()
+	e.setOverlay(id, link, punch)
+	e.wireOverlayLink(link)
+	link.StartJoinerRelay(context.Background(), e.server.Port(), e.mgr.DataPort())
+}
+
 func (e *Engine) probePairedPeer(id string) {
 	if e.paired == nil {
 		return
@@ -1335,17 +1439,18 @@ func (e *Engine) probePairedPeer(id string) {
 			})
 		}
 		if link := e.overlayForPeer(id); link != nil {
-			live, err := link.ProbeInfo(ctx, peer)
+			live, err := e.probeOverOverlay(ctx, id, inv, peer, hostSide, link)
 			if err != nil {
 				e.logf("paired peer %q unreachable: %v", peer.Name, err)
-				e.dropPairedPeer(id)
+				e.paired.SetStatus(id, pairing.StatusError)
+				e.emitPeers()
 				return
 			}
 			live.Paired = true
 			e.paired.Update(id, live)
 			e.touchInternetActivity(id)
 			e.emitPeers()
-			if link.Mode() == "direct" {
+			if link := e.overlayForPeer(id); link != nil && link.Mode() == "direct" {
 				e.logf("paired peer %q using direct QUIC P2P", peer.Name)
 			}
 			return
