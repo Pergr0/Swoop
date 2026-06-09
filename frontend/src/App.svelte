@@ -44,6 +44,7 @@
     pairStatus?: string;
     connectReach?: string;
     connectPath?: string;
+    p2pNote?: string;
   }
   interface NetInterface {
     name: string;
@@ -209,7 +210,16 @@
     return p.connectPath === "relay" ? "R" : "P2P";
   }
   function connectPathTitle(p: DeviceInfo): string {
-    return p.connectPath === "relay" ? t("connect.relay") : t("connect.p2p");
+    if (p.connectPath === "p2p") return t("connect.p2p");
+    switch (p.p2pNote) {
+      case "upgrading": return t("connect.p2pUpgrading");
+      case "no_upnp": return t("connect.relayNoUpnp");
+      case "punch_timeout": return t("connect.relayPunch");
+      case "quic_failed": return t("connect.relayQuic");
+      case "negotiate_failed": return t("connect.relayNegotiate");
+      case "no_punch": return t("connect.relayNoPunch");
+      default: return t("connect.relay");
+    }
   }
   function webUploadURL(s: DeviceInfo): string {
     const addr = s.address || s.host;

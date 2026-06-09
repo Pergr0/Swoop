@@ -112,6 +112,8 @@ host won't see each other (shared identity + control port).
   activity while paired. The rendezvous server scopes rooms by `sessionId`;
   overlay WebSocket attach requires the registered host or joiner `peerId`, and
   per-IP rate limits guard register/join/poll/touch/overlay endpoints.
+  P2P upgrade: relay first, then QUIC; host maps QUIC UDP via UPnP when
+  available; `p2pNote` on the device tile explains relay fallback.
 - Network interface selection: a startup picker (`core/netif` enumerates up,
   non-loopback IPv4 interfaces with a name, addresses, a kind icon
   (wifi/ethernet/tunnel/virtual/other via `frontend/src/assets/net/`), and

@@ -17,6 +17,12 @@ const en = {
   "connect.internet": "Internet (invite)",
   "connect.relay": "Via relay server",
   "connect.p2p": "Direct P2P",
+  "connect.p2pUpgrading": "Upgrading to direct P2P…",
+  "connect.relayNoUpnp": "Relay — host has no UPnP (public port)",
+  "connect.relayPunch": "Relay — NAT punch failed",
+  "connect.relayQuic": "Relay — direct QUIC failed",
+  "connect.relayNegotiate": "Relay — upgrade negotiate failed",
+  "connect.relayNoPunch": "Relay — no punch socket",
 
   "drop.overlay": "Release to add files",
   "drop.tileHint": "Release to send here",

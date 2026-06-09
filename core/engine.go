@@ -91,7 +91,8 @@ type Engine struct {
 	inviteJoinerID   string
 	inviteSessionID  string
 	invitePunchPort  int
-	inviteReach      *invite.Reach
+	inviteReach       *invite.Reach
+	inviteQuicRelease func()
 
 	overlayMu sync.Mutex
 	overlays  map[string]*overlay.Link
@@ -962,6 +963,13 @@ func (e *Engine) Peers() []protocol.DeviceInfo {
 	return out
 }
 
+func (e *Engine) wireOverlayLink(link *overlay.Link) {
+	if link == nil {
+		return
+	}
+	link.SetOnModeChange(func() { e.emitPeers() })
+}
+
 func (e *Engine) decoratePeer(p protocol.DeviceInfo) protocol.DeviceInfo {
 	if p.Paired {
 		p.ConnectReach = protocol.ConnectInternet
@@ -969,8 +977,10 @@ func (e *Engine) decoratePeer(p protocol.DeviceInfo) protocol.DeviceInfo {
 			switch link.Mode() {
 			case "relay":
 				p.ConnectPath = protocol.ConnectRelay
+				p.P2PNote = link.P2PNote()
 			case "direct":
 				p.ConnectPath = protocol.ConnectP2P
+				p.P2PNote = ""
 			}
 		} else if p.PairStatus == pairing.StatusConnected {
 			p.ConnectPath = protocol.ConnectP2P
@@ -1081,12 +1091,25 @@ func (e *Engine) rendezvousHostLoop(ctx context.Context, sessionID string, punch
 			LanAddr:     self.Address,
 			PunchPort:   punchPort,
 			PunchConn:   punchConn,
-			Logf:        e.logf,
+			OnQuicBound: func(quicPort int) {
+				if quicPort <= 0 {
+					return
+				}
+				mapCtx, mapCancel := context.WithTimeout(context.Background(), 6*time.Second)
+				defer mapCancel()
+				if rel, ok := nat.TryMapUDPPort(mapCtx, quicPort, e.logf); ok {
+					e.inviteHostMu.Lock()
+					e.inviteQuicRelease = rel
+					e.inviteHostMu.Unlock()
+				}
+			},
+			Logf: e.logf,
 		})
 		if err != nil {
 			e.logf("overlay host: %v", err)
 			return
 		}
+		e.wireOverlayLink(link)
 		e.inviteHostMu.Lock()
 		e.inviteOverlay = link
 		e.inviteHostMu.Unlock()
@@ -1131,7 +1154,12 @@ func (e *Engine) stopInviteHost() {
 	e.inviteSessionID = ""
 	e.invitePunchPort = 0
 	e.inviteReach = nil
+	quicRelease := e.inviteQuicRelease
+	e.inviteQuicRelease = nil
 	e.inviteHostMu.Unlock()
+	if quicRelease != nil {
+		quicRelease()
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -1280,6 +1308,7 @@ func (e *Engine) probePairedPeer(id string) {
 				return
 			}
 			e.setOverlay(id, link, punchConn)
+			e.wireOverlayLink(link)
 			link.StartJoinerRelay(context.Background(), e.server.Port(), e.mgr.DataPort())
 			e.logf("overlay: tunnel to %q ready (%s)", peer.Name, link.Mode())
 			joinerPunch := 0
@@ -1300,6 +1329,7 @@ func (e *Engine) probePairedPeer(id string) {
 				HostPunchPort:   inv.PunchPort,
 				JoinerPunchPort: joinerPunch,
 				JoinerReflexive: joinerReflexive,
+				JoinerPeerID:    e.id.DeviceID,
 				PunchConn:       punchConn,
 				Logf:            e.logf,
 			})

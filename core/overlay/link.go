@@ -64,9 +64,11 @@ type Link struct {
 	dataPort      int
 	directServing bool
 
-	closed chan struct{}
-	once   sync.Once
-	logf   func(string, ...any)
+	closed       chan struct{}
+	once         sync.Once
+	logf         func(string, ...any)
+	p2pNote      string
+	onModeChange func()
 }
 
 func (l *Link) activeMux() *yamux.Session {
@@ -103,10 +105,12 @@ func (l *Link) promoteDirect(mux *yamux.Session, qconn quic.Connection) {
 	l.directMux = mux
 	l.quicConn = qconn
 	l.relayMux = nil
+	l.p2pNote = ""
 	l.mu.Unlock()
 	if oldRelay != nil {
 		_ = oldRelay.Close()
 	}
+	l.notifyModeChange()
 }
 
 // ConnectJoiner opens relay WebSocket + yamux client.
@@ -177,6 +181,9 @@ func ServeHost(ctx context.Context, p HostParams) (*Link, error) {
 		}
 		link.quicUDP = quicUDP
 		link.quicPort = port
+		if p.OnQuicBound != nil {
+			p.OnQuicBound(port)
+		}
 		go link.runQUICListener(ctx)
 	}
 	go link.serveRelayInbound(ctx)
@@ -228,15 +235,27 @@ func (l *Link) runQUICListener(ctx context.Context) {
 
 // StartUpgrade attempts relay → direct QUIC in the background (joiner).
 func (l *Link) StartUpgrade(ctx context.Context, p UpgradeParams) {
-	if l == nil || p.PunchConn == nil || p.Fingerprint == "" {
+	if l == nil || p.Fingerprint == "" {
 		return
 	}
+	if p.PunchConn == nil {
+		l.setP2PNote(P2PNoteNoPunch)
+		if p.Logf != nil {
+			p.Logf("overlay direct upgrade: no punch socket (keeping relay)")
+		}
+		return
+	}
+	l.setP2PNote(P2PNoteUpgrading)
 	go func() {
-		upCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		upCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		if err := l.upgradeToDirect(upCtx, p); err != nil {
+		var offer upgradeOffer
+		err := l.upgradeToDirect(upCtx, p, &offer)
+		if err != nil {
+			note := classifyUpgradeFail(err, offer)
+			l.setP2PNote(note)
 			if p.Logf != nil {
-				p.Logf("overlay direct upgrade: %v (keeping relay)", err)
+				p.Logf("overlay direct upgrade failed (%s): %v (keeping relay)", note, err)
 			}
 			return
 		}
@@ -246,44 +265,54 @@ func (l *Link) StartUpgrade(ctx context.Context, p UpgradeParams) {
 	}()
 }
 
-func (l *Link) upgradeToDirect(ctx context.Context, p UpgradeParams) error {
+func (l *Link) upgradeToDirect(ctx context.Context, p UpgradeParams, offerOut *upgradeOffer) error {
 	relay := l.relayMuxSession()
 	if relay == nil {
-		return errors.New("no relay session")
+		return errUpgradeNoRelay
 	}
 	stream, err := relay.Open()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errUpgradeNegotiate, err)
 	}
 	defer stream.Close()
 	if _, err := stream.Write([]byte{StreamUpgrade}); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errUpgradeNegotiate, err)
 	}
 	req := upgradeRequest{JoinerPunchPort: p.JoinerPunchPort, JoinerReflexive: p.JoinerReflexive}
 	if err := json.NewEncoder(stream).Encode(&req); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errUpgradeNegotiate, err)
 	}
 	var offer upgradeOffer
 	if err := json.NewDecoder(stream).Decode(&offer); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", errUpgradeNegotiate, err)
+	}
+	if offerOut != nil {
+		*offerOut = offer
 	}
 	if offer.QuicPort <= 0 {
-		return errors.New("host offered no quic port")
+		return errUpgradeNoQuic
 	}
 	targets := quicPunchTargets(offer.ReachAddr, offer.LanAddr, offer.QuicPort, offer.PunchPort)
-	punchCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	punchCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	_ = pairing.PunchAddrs(punchCtx, p.PunchConn, p.SessionID, "joiner", targets)
+	peerID := p.JoinerPeerID
+	if peerID == "" {
+		peerID = "joiner"
+	}
+	punchErr := pairing.PunchAddrs(punchCtx, p.PunchConn, p.SessionID, peerID, targets)
 
 	dialHost := firstAddr(offer.ReachAddr, offer.LanAddr)
 	qconn, err := dialQUIC(ctx, p.PunchConn, net.JoinHostPort(dialHost, strconv.Itoa(offer.QuicPort)), p.Fingerprint)
 	if err != nil {
-		return err
+		if punchErr != nil {
+			return fmt.Errorf("%w: %v", errUpgradePunch, punchErr)
+		}
+		return fmt.Errorf("%w: %v", errUpgradeQuicDial, err)
 	}
 	mux, err := yamuxOverQUIC(ctx, qconn, false)
 	if err != nil {
 		_ = qconn.CloseWithError(0, "yamux")
-		return err
+		return fmt.Errorf("%w: %v", errUpgradeQuicDial, err)
 	}
 	l.promoteDirect(mux, qconn)
 	return nil

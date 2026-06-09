@@ -19,6 +19,12 @@ const ru: Record<MessageKey, string> = {
   "connect.internet": "Интернет (приглашение)",
   "connect.relay": "Через relay-сервер",
   "connect.p2p": "Прямой P2P",
+  "connect.p2pUpgrading": "Переход на прямой P2P…",
+  "connect.relayNoUpnp": "Relay — у хоста нет UPnP (публичный порт)",
+  "connect.relayPunch": "Relay — не удалось пробить NAT",
+  "connect.relayQuic": "Relay — прямой QUIC не установился",
+  "connect.relayNegotiate": "Relay — сбой согласования P2P",
+  "connect.relayNoPunch": "Relay — нет UDP punch",
 
   "drop.overlay": "Отпустите, чтобы добавить файлы",
   "drop.tileHint": "Отпустите для отправки",

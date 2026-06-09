@@ -189,8 +189,9 @@ within **15 minutes**.
 transfer), app closed, or network loss. Re-pair with a fresh invite.
 
 **Internet transfer slow or stuck on relay** — badge **R** means traffic goes
-through the relay; **P2P** means a direct path was negotiated. Some NAT setups
-stay on relay only.
+through the relay; **P2P** means a direct QUIC path was negotiated. Hover the
+badge for the reason (no UPnP on host, NAT punch failed, etc.). The host
+auto-maps the QUIC UDP port via UPnP when the router supports it.
 
 **Diagnostics log** — the engine writes `swoop.log` under the app data folder
 (same place as device identity):

@@ -98,6 +98,8 @@ type DeviceInfo struct {
 	ConnectReach string `json:"connectReach,omitempty"`
 	// ConnectPath is "relay" or "p2p" for internet peers once the route is known.
 	ConnectPath string `json:"connectPath,omitempty"`
+	// P2PNote explains relay fallback: upgrading, no_upnp, punch_timeout, quic_failed, …
+	P2PNote string `json:"p2pNote,omitempty"`
 }
 
 // PresenceRequest is sent by a browser client to appear in the desktop grid.

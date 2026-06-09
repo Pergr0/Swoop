@@ -15,8 +15,9 @@ type HostParams struct {
 	ReachAddr   string
 	LanAddr     string
 	PunchPort   int
-	PunchConn   *net.UDPConn
-	Logf        func(string, ...any)
+	PunchConn    *net.UDPConn
+	OnQuicBound  func(quicPort int) // UPnP map overlay QUIC UDP when bound
+	Logf         func(string, ...any)
 }
 
 // UpgradeParams configures joiner-side relay → direct QUIC upgrade after punch.
@@ -29,6 +30,7 @@ type UpgradeParams struct {
 	HostQuicPort    int // filled after upgrade negotiate if host uses dynamic port
 	JoinerPunchPort int
 	JoinerReflexive string
+	JoinerPeerID    string
 	PunchConn       *net.UDPConn
 	Logf            func(string, ...any)
 }
