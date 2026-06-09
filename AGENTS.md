@@ -102,6 +102,14 @@ host won't see each other (shared identity + control port).
   plus a parsed User-Agent browser label; platform `web` uses the globe icon.
   Web tiles are clickable: desktop can stage and send files to the phone (phase 2
   HTTP pull). Chat is hidden for web peers (browser has no message endpoint).
+- Internet invite pairing (`core/pairing`, rendezvous + overlay relay): LAN
+  discovery is unchanged (peers stay visible while on the LAN; no relay slot).
+  Invite-paired peers use a 20-minute idle timer after the last chat message or
+  finished/canceled transfer; an active transfer (including waiting for accept)
+  pauses the timer so long sends are not cut off. When idle expires, both sides
+  send `POST /api/v1/goodbye` and remove the tile. The signed invite blob still
+  expires in 15 minutes if nobody joins; rendezvous room TTL is refreshed on
+  activity while paired.
 - Network interface selection: a startup picker (`core/netif` enumerates up,
   non-loopback IPv4 interfaces with a name, addresses, a kind icon
   (wifi/ethernet/tunnel/virtual/other via `frontend/src/assets/net/`), and

@@ -36,6 +36,11 @@ type HostInfo struct {
 	JoinerReflexive string `json:"joinerReflexive,omitempty"`
 }
 
+// TouchRequest extends rendezvous room lifetime after pairing (activity keepalive).
+type TouchRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
 // JoinerInfo is returned to the host when a joiner appears (for reverse punch).
 type JoinerInfo struct {
 	PeerID        string   `json:"peerId"`

@@ -29,6 +29,10 @@ func (c *captureHandler) ReceiveRead(rr protocol.ReadReceipt, _, _ string) int {
 	return http.StatusOK
 }
 
+func (c *captureHandler) ReceiveGoodbye(_ protocol.GoodbyeNotice, _, _ string) int {
+	return http.StatusOK
+}
+
 func startMsgServer(t *testing.T, h MessageHandler) (*Server, *identity.Identity) {
 	t.Helper()
 	id, err := identity.LoadOrCreate(t.TempDir(), "recv")

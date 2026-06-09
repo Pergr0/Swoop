@@ -30,6 +30,7 @@ func (s *Server) ListenAndServe() error {
 	mux.HandleFunc("/api/v1/rendezvous/host", s.handleHost)
 	mux.HandleFunc("/api/v1/rendezvous/join", s.handleJoin)
 	mux.HandleFunc("/api/v1/rendezvous/poll", s.handlePoll)
+	mux.HandleFunc("/api/v1/rendezvous/touch", s.handleTouch)
 	mux.HandleFunc("/api/v1/overlay/connect", s.handleOverlayConnect)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -97,6 +98,24 @@ func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(out)
+}
+
+func (s *Server) handleTouch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req rendezvous.TouchRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || req.SessionID == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !s.Store.TouchSession(req.SessionID) {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
 func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {

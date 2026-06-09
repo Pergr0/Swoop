@@ -50,6 +50,7 @@ type PresenceHandler interface {
 type MessageHandler interface {
 	ReceiveMessage(msg protocol.ChatMessage, remoteAddr, webToken string) int
 	ReceiveRead(rr protocol.ReadReceipt, remoteAddr, webToken string) int
+	ReceiveGoodbye(notice protocol.GoodbyeNotice, remoteAddr, webToken string) int
 }
 
 // WebChatHandler serves browser chat polling (desktop→browser delivery).
@@ -128,6 +129,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 	mux.HandleFunc("/api/v1/download/", s.recover(s.handleHTTPDownload))
 	mux.HandleFunc("/api/v1/message", s.recover(s.handleMessage))
 	mux.HandleFunc("/api/v1/read", s.recover(s.handleRead))
+	mux.HandleFunc("/api/v1/goodbye", s.recover(s.handleGoodbye))
 	mux.HandleFunc("/api/v1/chat", s.recover(s.handleChatPoll))
 	mux.Handle("/", webui.Handler())
 
@@ -389,5 +391,24 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := s.messages.ReceiveRead(rr, r.RemoteAddr, r.Header.Get("X-Swoop-Web-Token"))
+	w.WriteHeader(status)
+}
+
+func (s *Server) handleGoodbye(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.messages == nil {
+		http.Error(w, "messages not supported", http.StatusServiceUnavailable)
+		return
+	}
+	var notice protocol.GoodbyeNotice
+	dec := json.NewDecoder(io.LimitReader(r.Body, 8192))
+	if err := dec.Decode(&notice); err != nil || notice.Device.ID == "" {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	status := s.messages.ReceiveGoodbye(notice, r.RemoteAddr, r.Header.Get("X-Swoop-Web-Token"))
 	w.WriteHeader(status)
 }

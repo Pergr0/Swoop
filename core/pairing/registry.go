@@ -18,16 +18,20 @@ const (
 
 	reapInterval  = 30 * time.Second
 	probeInterval = 25 * time.Second
+
+	// InternetIdleTimeout is how long an invite-paired peer may stay connected
+	// without chat or file-transfer activity (active transfers pause the timer).
+	InternetIdleTimeout = 20 * time.Minute
 )
 
 type entry struct {
-	info      protocol.DeviceInfo
-	expiresAt int64
-	invite    invite.Parsed
-	status    string
+	info         protocol.DeviceInfo
+	invite       invite.Parsed
+	status       string
+	idleDeadline time.Time
 }
 
-// Registry holds invite-paired peers until their invite expires.
+// Registry holds invite-paired internet peers until idle timeout or removal.
 type Registry struct {
 	mu       sync.RWMutex
 	peers    map[string]entry
@@ -35,6 +39,8 @@ type Registry struct {
 	onChange func([]protocol.DeviceInfo)
 	onProbe  func(id string) // called on interval and after add
 	onRemove func(id string)
+	onIdle func(protocol.DeviceInfo) // idle timeout: send goodbye, tear down overlay
+	isBusy func(id string) bool
 }
 
 // New creates an empty paired-peer registry.
@@ -48,8 +54,14 @@ func (r *Registry) OnChange(fn func([]protocol.DeviceInfo)) { r.onChange = fn }
 // OnProbe registers a callback to re-check reachability (engine provides TLS /info probe).
 func (r *Registry) OnProbe(fn func(id string)) { r.onProbe = fn }
 
-// OnRemove registers a callback when a paired peer is reaped or replaced.
+// OnRemove registers a callback when a paired peer is removed.
 func (r *Registry) OnRemove(fn func(id string)) { r.onRemove = fn }
+
+// SetIdlePolicy configures idle reap: isBusy pauses the timer during transfers.
+func (r *Registry) SetIdlePolicy(isBusy func(id string) bool, onIdle func(protocol.DeviceInfo)) {
+	r.isBusy = isBusy
+	r.onIdle = onIdle
+}
 
 // Add records a verified invite peer. Replaces an existing entry with the same ID.
 func (r *Registry) Add(device protocol.DeviceInfo, inv invite.Parsed) {
@@ -60,10 +72,10 @@ func (r *Registry) Add(device protocol.DeviceInfo, inv invite.Parsed) {
 	device.Paired = true
 	device.PairStatus = StatusConnecting
 	r.peers[device.ID] = entry{
-		info:      device,
-		expiresAt: inv.ExpiresAt,
-		invite:    inv,
-		status:    StatusConnecting,
+		info:         device,
+		invite:       inv,
+		status:       StatusConnecting,
+		idleDeadline: time.Now().Add(InternetIdleTimeout),
 	}
 	id := device.ID
 	r.mu.Unlock()
@@ -104,6 +116,38 @@ func (r *Registry) Update(id string, device protocol.DeviceInfo) {
 	e.status = StatusConnected
 	r.peers[id] = e
 	r.mu.Unlock()
+	r.emit()
+}
+
+// TouchActivity resets the internet idle timer for a paired peer.
+func (r *Registry) TouchActivity(id string) bool {
+	r.mu.Lock()
+	e, ok := r.peers[id]
+	if !ok {
+		r.mu.Unlock()
+		return false
+	}
+	e.idleDeadline = time.Now().Add(InternetIdleTimeout)
+	r.peers[id] = e
+	r.mu.Unlock()
+	return true
+}
+
+// Remove drops a paired peer immediately (goodbye or unreachable).
+func (r *Registry) Remove(id string) {
+	r.mu.Lock()
+	_, ok := r.peers[id]
+	if ok {
+		delete(r.peers, id)
+		r.order = removeID(r.order, id)
+	}
+	r.mu.Unlock()
+	if !ok {
+		return
+	}
+	if r.onRemove != nil {
+		r.onRemove(id)
+	}
 	r.emit()
 }
 
@@ -185,7 +229,7 @@ func (r *Registry) Start(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-reap.C:
-			r.reap()
+			r.reapIdle()
 		case <-probe.C:
 			r.probeAll()
 		}
@@ -201,24 +245,32 @@ func (r *Registry) probeAll() {
 	}
 }
 
-func (r *Registry) reap() {
-	now := time.Now().Unix()
+func (r *Registry) reapIdle() {
+	now := time.Now()
+	var expired []protocol.DeviceInfo
 	r.mu.Lock()
-	changed := false
 	for id, e := range r.peers {
-		if e.expiresAt > 0 && now > e.expiresAt {
+		if r.isBusy != nil && r.isBusy(id) {
+			continue
+		}
+		if !e.idleDeadline.IsZero() && now.After(e.idleDeadline) {
+			expired = append(expired, e.info)
 			delete(r.peers, id)
 			r.order = removeID(r.order, id)
-			changed = true
-			if r.onRemove != nil {
-				r.onRemove(id)
-			}
 		}
 	}
 	r.mu.Unlock()
-	if changed {
-		r.emit()
+	if len(expired) == 0 {
+		return
 	}
+	for _, peer := range expired {
+		if r.onIdle != nil {
+			r.onIdle(peer)
+		} else if r.onRemove != nil {
+			r.onRemove(peer.ID)
+		}
+	}
+	r.emit()
 }
 
 func (r *Registry) emit() {

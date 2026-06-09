@@ -192,6 +192,11 @@ type ReadReceipt struct {
 	UpToTs int64      `json:"upToTs"`
 }
 
+// GoodbyeNotice signals a peer is shutting down (invite-paired or LAN).
+type GoodbyeNotice struct {
+	Device DeviceInfo `json:"device"`
+}
+
 // WebChatPollResponse is returned when a browser polls for desktop→browser chat.
 type WebChatPollResponse struct {
 	Messages []ChatMessage `json:"messages"`

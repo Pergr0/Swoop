@@ -55,6 +55,19 @@ func (s *Store) RegisterHost(sessionID, peerID, deviceName, lanAddr, reachAddr, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reapLocked()
+	if r, ok := s.rooms[sessionID]; ok && r.host.peerID == peerID {
+		r.host.deviceName = deviceName
+		r.host.lanAddr = lanAddr
+		r.host.controlPort = controlPort
+		r.host.punchPort = punchPort
+		r.host.reachAddr = reachAddr
+		r.host.reachPort = reachPort
+		if reflexiveIP != "" {
+			r.host.reflexiveIP = reflexiveIP
+		}
+		r.host.expiresAt = time.Now().Add(defaultTTL)
+		return
+	}
 	s.rooms[sessionID] = &room{
 		sessionID: sessionID,
 		host: hostRecord{
@@ -69,6 +82,18 @@ func (s *Store) RegisterHost(sessionID, peerID, deviceName, lanAddr, reachAddr, 
 		s.logf("event=host_register session=%s peer=%s reflexive=%s punch=%d reach=%s control=%d",
 			sessionID, peerID, reflexiveIP, punchPort, reachAddr, controlPort)
 	}
+}
+
+// TouchSession extends room lifetime for an active paired session.
+func (s *Store) TouchSession(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.rooms[sessionID]
+	if !ok {
+		return false
+	}
+	r.host.expiresAt = time.Now().Add(defaultTTL)
+	return true
 }
 
 func (s *Store) Join(sessionID, peerID, lanAddr, reflexiveIP, deviceName, fingerprint string, punchPort, controlPort int, capabilities []string) (*room, bool) {

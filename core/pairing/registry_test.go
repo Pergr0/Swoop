@@ -39,10 +39,13 @@ func TestRegistryAddStatusesReap(t *testing.T) {
 		t.Fatalf("expected error")
 	}
 
-	inv.ExpiresAt = time.Now().Add(-time.Minute).Unix()
-	r.Add(dev, inv)
-	r.reap()
+	r.mu.Lock()
+	e := r.peers["peer-1"]
+	e.idleDeadline = time.Now().Add(-time.Minute)
+	r.peers["peer-1"] = e
+	r.mu.Unlock()
+	r.reapIdle()
 	if len(r.Peers()) != 0 {
-		t.Fatalf("expected expired peer removed")
+		t.Fatalf("expected idle peer removed")
 	}
 }

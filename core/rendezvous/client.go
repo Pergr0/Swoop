@@ -38,6 +38,11 @@ func (c *Client) Join(ctx context.Context, req JoinRequest) (HostInfo, error) {
 	return out, err
 }
 
+// TouchSession extends rendezvous room TTL (paired peers refresh on activity).
+func (c *Client) TouchSession(ctx context.Context, sessionID string) error {
+	return c.post(ctx, "/api/v1/rendezvous/touch", TouchRequest{SessionID: sessionID}, nil)
+}
+
 // PollJoiner returns joiner reflexive endpoints when the importer has checked in.
 func (c *Client) PollJoiner(ctx context.Context, sessionID, hostPeerID string) (JoinerInfo, bool, error) {
 	url := fmt.Sprintf("%s/api/v1/rendezvous/poll?sessionId=%s&hostPeerId=%s",

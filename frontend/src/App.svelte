@@ -87,9 +87,15 @@
   let view: "grid" | "device" = "grid";
   let selected: DeviceInfo | null = null;
 
+  interface PeerStaging {
+    roots: StagingEntry[];
+    expanded: Record<string, boolean>;
+    selected: Record<string, boolean>;
+  }
   let stagingRoots: StagingEntry[] = [];
   let expandedDirs: Record<string, boolean> = {};
   let selectedFiles: Record<string, boolean> = {};
+  let stagingByPeer: Record<string, PeerStaging> = {};
   let stagingError = "";
   let showAdvanced = false;
 
@@ -319,9 +325,30 @@
 
   async function refresh() { peers = ((await Peers()) as DeviceInfo[]) ?? []; }
 
+  function persistStaging(peerId: string) {
+    stagingByPeer[peerId] = {
+      roots: stagingRoots,
+      expanded: { ...expandedDirs },
+      selected: { ...selectedFiles },
+    };
+  }
+  function restoreStaging(peerId: string) {
+    const s = stagingByPeer[peerId];
+    stagingRoots = s?.roots ?? [];
+    expandedDirs = s ? { ...s.expanded } : {};
+    selectedFiles = s ? { ...s.selected } : {};
+    stagingError = "";
+  }
+  function clearStagingForPeer(peerId: string) {
+    delete stagingByPeer[peerId];
+    if (selected?.id === peerId) clearStaged();
+  }
+
   async function selectDevice(p: DeviceInfo) {
+    if (selected && selected.id !== p.id) persistStaging(selected.id);
     selected = p;
     view = "device";
+    restoreStaging(p.id);
     sendState = null;
     sendProgress = null;
     chatError = "";
@@ -415,6 +442,7 @@
     }
   }
   function back() {
+    if (selected) persistStaging(selected.id);
     view = "grid";
     chatMessages = [];
     dragDepth = 0;
@@ -546,6 +574,7 @@
     expandedDirs = {};
     selectedFiles = {};
     stagingError = "";
+    if (selected) delete stagingByPeer[selected.id];
   }
   async function pickFiles() { await addPaths((await OpenFilePicker()) as string[]); }
   async function pickFolder() {
@@ -587,7 +616,15 @@
     await tick();
     nudgeLayout();
     await refresh();
-    unsub.push(EventsOn("peers:changed", (d: DeviceInfo[]) => (peers = d ?? [])));
+    unsub.push(EventsOn("peers:changed", (d: DeviceInfo[]) => {
+      peers = d ?? [];
+      if (selected && !peers.some((p) => p.id === selected!.id)) {
+        clearStagingForPeer(selected.id);
+        selected = null;
+        view = "grid";
+        chatMessages = [];
+      }
+    }));
     unsub.push(EventsOn("files:dropped", (payload: DropPayload) => {
       const { paths, x, y } = parseDropPayload(payload);
       handleFileDrop(x, y, paths);
@@ -597,8 +634,10 @@
       if (p.direction === "send") sendProgress = p; else recvProgress = p;
     }));
     unsub.push(EventsOn("transfer:state", (s: TState) => {
-      if (s.direction === "send") sendState = s;
-      else recvState = s;
+      if (s.direction === "send") {
+        sendState = s;
+        if (s.state === "completed" && selected) clearStagingForPeer(selected.id);
+      } else recvState = s;
     }));
     unsub.push(EventsOn("chat:message", (m: ChatMsg) => {
       if (selected && view === "device" && m.peerId === selected.id) {

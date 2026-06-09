@@ -165,6 +165,22 @@ func (m *Manager) Shutdown() {
 	m.CancelIncoming()
 }
 
+// IsBusyWith reports whether an active transfer session involves peerID.
+func (m *Manager) IsBusyWith(peerID string) bool {
+	if peerID == "" {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s := m.outgoing; s != nil && s.peer.ID == peerID {
+		return true
+	}
+	if s := m.incoming; s != nil && s.sender.ID == peerID {
+		return true
+	}
+	return false
+}
+
 // DataPort returns the bound data-plane port (0 until StartDataPlane).
 func (m *Manager) DataPort() int { return m.dataPort }
 

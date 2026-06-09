@@ -77,9 +77,11 @@ type Engine struct {
 	webReadMu     sync.Mutex
 	webReadNotify map[string]int64 // read receipts queued for browser poll
 
-	onPeers func([]protocol.DeviceInfo)
-	onChat  func(chat.Message)
-	onRead  func(peerID string, upToTs int64)
+	onPeers          func([]protocol.DeviceInfo)
+	onChat           func(chat.Message)
+	onRead           func(peerID string, upToTs int64)
+	onTransferState  func(transfer.State)
+	onTransferOffer  func(transfer.Offer)
 
 	inviteHostMu     sync.Mutex
 	inviteHostCancel context.CancelFunc
@@ -87,6 +89,9 @@ type Engine struct {
 	invitePunchConn  *net.UDPConn
 	inviteOverlay    *overlay.Link
 	inviteJoinerID   string
+	inviteSessionID  string
+	invitePunchPort  int
+	inviteReach      *invite.Reach
 
 	overlayMu sync.Mutex
 	overlays  map[string]*overlay.Link
@@ -147,6 +152,7 @@ func (e *Engine) Close() {
 
 func (e *Engine) shutdown() {
 	e.logf("engine shutting down")
+	e.sendPairedGoodbyes()
 	e.stopInviteHost()
 	e.mgr.Shutdown()
 	if e.disco != nil {
@@ -239,13 +245,40 @@ func (e *Engine) Interfaces() []netif.NetInterface { return netif.List() }
 func (e *Engine) OnPeersChanged(fn func([]protocol.DeviceInfo)) { e.onPeers = fn }
 
 // OnTransferOffer registers a callback for incoming upload offers.
-func (e *Engine) OnTransferOffer(fn func(transfer.Offer)) { e.mgr.SetOnOffer(fn) }
+func (e *Engine) OnTransferOffer(fn func(transfer.Offer)) {
+	e.onTransferOffer = fn
+	e.mgr.SetOnOffer(e.emitTransferOffer)
+}
 
 // OnTransferProgress registers a callback for transfer progress updates.
 func (e *Engine) OnTransferProgress(fn func(transfer.Progress)) { e.mgr.SetOnProgress(fn) }
 
 // OnTransferState registers a callback for transfer lifecycle updates.
-func (e *Engine) OnTransferState(fn func(transfer.State)) { e.mgr.SetOnState(fn) }
+func (e *Engine) OnTransferState(fn func(transfer.State)) {
+	e.onTransferState = fn
+	e.mgr.SetOnState(e.emitTransferState)
+}
+
+func (e *Engine) emitTransferOffer(o transfer.Offer) {
+	if o.Sender.ID != "" {
+		e.touchInternetActivity(o.Sender.ID)
+	}
+	if e.onTransferOffer != nil {
+		e.onTransferOffer(o)
+	}
+}
+
+func (e *Engine) emitTransferState(s transfer.State) {
+	switch s.State {
+	case "completed", "declined", "failed", "canceled":
+		if id := e.peerIDForName(s.Peer); id != "" {
+			e.touchInternetActivity(id)
+		}
+	}
+	if e.onTransferState != nil {
+		e.onTransferState(s)
+	}
+}
 
 // SendTo starts an outgoing transfer to the peer with the given id.
 func (e *Engine) SendTo(deviceID string, items []protocol.SendItem) error {
@@ -261,6 +294,7 @@ func (e *Engine) SendTo(deviceID string, items []protocol.SendItem) error {
 			return i18n.ErrPeerNoAddress(peer.Name)
 		}
 	}
+	e.touchInternetActivity(deviceID)
 	return e.mgr.Send(peer, items)
 }
 
@@ -350,6 +384,7 @@ func (e *Engine) SendMessage(deviceID, text string) error {
 	if e.chat != nil {
 		_ = e.chat.Append(rec)
 	}
+	e.touchInternetActivity(peer.ID)
 	e.emitChat(rec)
 	return nil
 }
@@ -387,6 +422,7 @@ func (e *Engine) ReceiveMessage(msg protocol.ChatMessage, remoteAddr, webToken s
 		}
 	}
 	e.logf("chat message from %s (%s): %d bytes", msg.Sender.Name, remoteAddr, len(text))
+	e.touchInternetActivity(peerID)
 	e.emitChat(rec)
 	return http.StatusOK
 }
@@ -457,18 +493,173 @@ func (e *Engine) MarkRead(deviceID string) {
 		e.webReadMu.Unlock()
 		return
 	}
-	if peer.Fingerprint == "" || peer.Address == "" || peer.ControlPort == 0 {
+	if peer.Fingerprint == "" {
 		return
 	}
+	if peer.Address == "" || peer.ControlPort == 0 {
+		if e.overlayForPeer(deviceID) == nil {
+			return
+		}
+	}
 	body, _ := json.Marshal(protocol.ReadReceipt{Reader: e.Self(), UpToTs: upTo})
-	client := transport.NewPinnedClient(peer.Fingerprint, 5*time.Second)
-	url := "https://" + net.JoinHostPort(peer.Address, strconv.Itoa(peer.ControlPort)) + "/api/v1/read"
-	resp, err := client.Post(url, "application/json", bytes.NewReader(body))
-	if err != nil {
-		e.logf("read receipt to %s failed: %v", peer.Name, err)
+	var resp *http.Response
+	var postErr error
+	if link := e.overlayForPeer(deviceID); link != nil {
+		client := link.HTTPClient(peer.Fingerprint, 5*time.Second)
+		resp, postErr = client.Post("https://overlay/api/v1/read", "application/json", bytes.NewReader(body))
+	} else {
+		client := transport.NewPinnedClient(peer.Fingerprint, 5*time.Second)
+		url := "https://" + net.JoinHostPort(peer.Address, strconv.Itoa(peer.ControlPort)) + "/api/v1/read"
+		resp, postErr = client.Post(url, "application/json", bytes.NewReader(body))
+	}
+	if postErr != nil {
+		e.logf("read receipt to %s failed: %v", peer.Name, postErr)
 		return
 	}
 	_ = resp.Body.Close()
+}
+
+// ReceiveGoodbye removes an invite-paired peer that is shutting down.
+func (e *Engine) ReceiveGoodbye(notice protocol.GoodbyeNotice, remoteAddr, webToken string) int {
+	dev := notice.Device
+	if dev.ID == "" || dev.ID == e.id.DeviceID {
+		return http.StatusBadRequest
+	}
+	if dev.Platform == protocol.PlatformWeb {
+		if e.webPresence == nil || !e.webPresence.Verify(dev.ID, remoteAddr, webToken) {
+			return http.StatusForbidden
+		}
+	}
+	e.logf("goodbye from %s (%s)", dev.Name, remoteAddr)
+	e.dropPairedPeer(dev.ID)
+	return http.StatusOK
+}
+
+func (e *Engine) sendPairedGoodbyes() {
+	if e.paired == nil {
+		return
+	}
+	for _, peer := range e.paired.Peers() {
+		e.sendGoodbyeToPeer(peer)
+	}
+}
+
+func (e *Engine) sendGoodbyeToPeer(peer protocol.DeviceInfo) {
+	if peer.Platform == protocol.PlatformWeb || peer.Fingerprint == "" {
+		return
+	}
+	body, _ := json.Marshal(protocol.GoodbyeNotice{Device: e.Self()})
+	var resp *http.Response
+	var err error
+	if link := e.overlayForPeer(peer.ID); link != nil {
+		client := link.HTTPClient(peer.Fingerprint, 3*time.Second)
+		resp, err = client.Post("https://overlay/api/v1/goodbye", "application/json", bytes.NewReader(body))
+	} else if peer.Address != "" && peer.ControlPort > 0 {
+		client := transport.NewPinnedClient(peer.Fingerprint, 3*time.Second)
+		url := "https://" + net.JoinHostPort(peer.Address, strconv.Itoa(peer.ControlPort)) + "/api/v1/goodbye"
+		resp, err = client.Post(url, "application/json", bytes.NewReader(body))
+	}
+	if err != nil {
+		e.logf("goodbye to %s failed: %v", peer.Name, err)
+		return
+	}
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+}
+
+func (e *Engine) touchInternetActivity(peerID string) {
+	if peerID == "" || e.paired == nil {
+		return
+	}
+	if !e.paired.TouchActivity(peerID) {
+		return
+	}
+	e.refreshRendezvousSession(peerID)
+}
+
+func (e *Engine) refreshRendezvousSession(peerID string) {
+	if !rendezvous.Enabled() || e.paired == nil {
+		return
+	}
+	inv, ok := e.paired.InviteMeta(peerID)
+	if !ok || inv.SessionID == "" {
+		return
+	}
+	sessionID := inv.SessionID
+	e.inviteHostMu.Lock()
+	isHost := e.inviteJoinerID == peerID && e.inviteSessionID == sessionID
+	punchPort := e.invitePunchPort
+	reach := e.inviteReach
+	e.inviteHostMu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), clientTimeout())
+		defer cancel()
+		client := rendezvous.NewClient()
+		if isHost && punchPort > 0 {
+			self := e.Self()
+			req := rendezvous.HostRegisterRequest{
+				SessionID:   sessionID,
+				PeerID:      self.ID,
+				DeviceName:  self.Name,
+				LanAddr:     self.Address,
+				ControlPort: e.server.Port(),
+				PunchPort:   punchPort,
+			}
+			if reach != nil {
+				req.ReachAddr = reach.Addr
+				req.ReachPort = reach.ControlPort
+			}
+			if err := client.RegisterHost(ctx, req); err != nil {
+				e.logf("rendezvous refresh (host): %v", err)
+			}
+			return
+		}
+		if err := client.TouchSession(ctx, sessionID); err != nil {
+			e.logf("rendezvous refresh: %v", err)
+		}
+	}()
+}
+
+func (e *Engine) onPairedPeerIdle(peer protocol.DeviceInfo) {
+	e.logf("paired peer %q idle timeout — goodbye", peer.Name)
+	e.sendGoodbyeToPeer(peer)
+	e.removeOverlay(peer.ID)
+	e.inviteHostMu.Lock()
+	if e.inviteJoinerID == peer.ID {
+		e.inviteJoinerID = ""
+		e.inviteHostMu.Unlock()
+		e.stopInviteHost()
+	} else {
+		e.inviteHostMu.Unlock()
+	}
+	e.emitPeers()
+}
+
+func (e *Engine) peerIDForName(name string) string {
+	if name == "" {
+		return ""
+	}
+	for _, p := range e.Peers() {
+		if p.Name == name && p.Paired {
+			return p.ID
+		}
+	}
+	for _, p := range e.Peers() {
+		if p.Name == name {
+			return p.ID
+		}
+	}
+	return ""
+}
+
+func (e *Engine) dropPairedPeer(id string) {
+	if e.paired != nil {
+		e.paired.Remove(id)
+	}
+	e.removeOverlay(id)
+	e.emitPeers()
 }
 
 // ReceiveRead implements transport.MessageHandler: a peer acknowledges reading
@@ -716,6 +907,7 @@ func (e *Engine) Start(ctx context.Context, ifaceName string) error {
 	}
 	e.paired.OnProbe(e.probePairedPeer)
 	e.paired.OnRemove(func(id string) { e.removeOverlay(id) })
+	e.paired.SetIdlePolicy(e.mgr.IsBusyWith, e.onPairedPeerIdle)
 	go e.paired.Start(runCtx)
 	go e.webPresence.Start(runCtx)
 	if err := e.disco.Start(runCtx); err != nil {
@@ -827,10 +1019,13 @@ func (e *Engine) GenerateInvite() (invite.Bundle, error) {
 	e.inviteHostCancel = cancel
 	e.inviteNATRelease = natRelease
 	e.invitePunchConn = punchConn
+	e.inviteSessionID = bundle.SessionID
+	e.invitePunchPort = punchPort
+	e.inviteReach = reach
 	e.inviteHostMu.Unlock()
 
 	go pairing.RunPunchHost(hostCtx, punchConn, bundle.SessionID, e.logf)
-	go e.expireInviteHost(bundle.ExpiresAt)
+	go e.inviteHostWaitExpire(bundle.ExpiresAt)
 	go e.rendezvousHostLoop(hostCtx, bundle.SessionID, punchConn, punchPort, reach, bundle.ExpiresAt)
 
 	if reach != nil {
@@ -933,6 +1128,9 @@ func (e *Engine) stopInviteHost() {
 	e.inviteNATRelease = nil
 	e.inviteOverlay = nil
 	e.inviteJoinerID = ""
+	e.inviteSessionID = ""
+	e.invitePunchPort = 0
+	e.inviteReach = nil
 	e.inviteHostMu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -1002,18 +1200,26 @@ func (e *Engine) removeOverlay(peerID string) {
 	e.punchMu.Unlock()
 }
 
-func (e *Engine) expireInviteHost(expiresAt int64) {
+// inviteHostWaitExpire stops an unpaired invite host when the invite blob expires.
+// Once a joiner pairs, idle policy owns session lifetime (transfers may exceed 15 min).
+func (e *Engine) inviteHostWaitExpire(expiresAt int64) {
 	if expiresAt <= 0 {
 		return
 	}
 	wait := time.Until(time.Unix(expiresAt, 0))
-	if wait <= 0 {
-		e.stopInviteHost()
-		return
+	if wait < 0 {
+		wait = 0
 	}
 	t := time.NewTimer(wait)
 	defer t.Stop()
 	<-t.C
+	e.inviteHostMu.Lock()
+	paired := e.inviteJoinerID != ""
+	e.inviteHostMu.Unlock()
+	if paired {
+		return
+	}
+	e.logf("internet invite: expired with no joiner")
 	e.stopInviteHost()
 }
 
@@ -1037,6 +1243,7 @@ func (e *Engine) PairFromInvite(parsed invite.Parsed) error {
 		}
 	}
 	e.paired.Add(dev, parsed)
+	e.touchInternetActivity(dev.ID)
 	e.emitPeers()
 	return nil
 }
@@ -1100,13 +1307,13 @@ func (e *Engine) probePairedPeer(id string) {
 		if link := e.overlayForPeer(id); link != nil {
 			live, err := link.ProbeInfo(ctx, peer)
 			if err != nil {
-				e.logf("paired peer %q overlay probe: %v", peer.Name, err)
-				e.paired.SetStatus(id, pairing.StatusError)
-				e.emitPeers()
+				e.logf("paired peer %q unreachable: %v", peer.Name, err)
+				e.dropPairedPeer(id)
 				return
 			}
 			live.Paired = true
 			e.paired.Update(id, live)
+			e.touchInternetActivity(id)
 			e.emitPeers()
 			if link.Mode() == "direct" {
 				e.logf("paired peer %q using direct QUIC P2P", peer.Name)
@@ -1138,6 +1345,7 @@ func (e *Engine) probePairedPeer(id string) {
 		return
 	}
 	e.paired.Update(id, live)
+	e.touchInternetActivity(id)
 	e.emitPeers()
 }
 
@@ -1177,6 +1385,7 @@ func (e *Engine) pairRendezvousJoiner(sessionID string, j rendezvous.JoinerInfo,
 	e.inviteJoinerID = j.PeerID
 	e.inviteHostMu.Unlock()
 	e.paired.Add(dev, inv)
+	e.touchInternetActivity(dev.ID)
 	e.logf("internet invite: joiner %q paired on host (relay)", dev.Name)
 }
 
