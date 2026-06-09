@@ -79,9 +79,14 @@ bash scripts/build.sh [--check-only|--clean]
 ```
 
 Make shortcuts: `make build`, `make check`, `make clean-deps`, `make dev`,
-`make doctor`, `make core-test`, `make cross-core`.
+`make doctor`, `make core-test`, `make cross-core`, `make build-server`.
 
 Output binary: `build/bin/swoop.exe` (Windows) or `build/bin/swoop` (Linux/mac).
+
+Rendezvous VPS: `make build-server` (or `scripts/build-server.sh`) produces
+`build/deploy/` (`swoop-rendezvous`, `install.sh`, `swoop-rendezvous.service`).
+Copy to the VPS and run `sudo ./install.sh` — installs to `/opt/swoop/`,
+enables `swoop-rendezvous.service`, logs to `/var/log/swoop/rendezvous.log`.
 
 Note: testing discovery needs TWO machines on the same LAN; two instances on one
 host won't see each other (shared identity + control port).

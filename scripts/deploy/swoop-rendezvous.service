@@ -1,0 +1,20 @@
+[Unit]
+Description=Swoop internet rendezvous and overlay relay
+Documentation=https://github.com/Pergr0/Swoop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=swoop
+Group=swoop
+ExecStart=/opt/swoop/swoop-rendezvous -addr :53400
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/var/log/swoop/rendezvous.log
+StandardError=append:/var/log/swoop/rendezvous.log
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
