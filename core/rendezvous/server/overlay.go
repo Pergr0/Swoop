@@ -17,6 +17,9 @@ func (s *Server) handleOverlayConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.rateLimit(w, r, s.limits.overlay) {
+		return
+	}
 	q := r.URL.Query()
 	sessionID := q.Get("sessionId")
 	role := q.Get("role")
@@ -173,7 +176,10 @@ func (s *Store) AllowOverlay(sessionID, role, peerID string) bool {
 	case "host":
 		return r.host.peerID == peerID
 	case "joiner":
-		return peerID != "" && peerID != r.host.peerID
+		if r.joiner == nil {
+			return false
+		}
+		return r.joiner.peerID == peerID
 	default:
 		return false
 	}

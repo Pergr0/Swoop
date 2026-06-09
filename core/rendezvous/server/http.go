@@ -14,14 +14,15 @@ import (
 
 // Server is a minimal rendezvous HTTP server (signaling only, no file relay).
 type Server struct {
-	Store *Store
-	Addr  string
+	Store  *Store
+	Addr   string
+	limits *endpointLimits
 }
 
 // New creates a rendezvous server listening on addr (e.g. ":53400").
 func New(addr string) *Server {
 	logf := func(format string, args ...any) { log.Printf(format, args...) }
-	return &Server{Store: NewStore(logf), Addr: addr}
+	return &Server{Store: NewStore(logf), Addr: addr, limits: newEndpointLimits()}
 }
 
 // ListenAndServe starts the HTTP server.
@@ -52,6 +53,9 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.rateLimit(w, r, s.limits.host) {
+		return
+	}
 	var req rendezvous.HostRegisterRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 8192)).Decode(&req); err != nil || req.SessionID == "" || req.PeerID == "" {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -67,6 +71,9 @@ func (s *Server) handleHost(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleJoin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.rateLimit(w, r, s.limits.join) {
 		return
 	}
 	var req rendezvous.JoinRequest
@@ -105,6 +112,9 @@ func (s *Server) handleTouch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !s.rateLimit(w, r, s.limits.touch) {
+		return
+	}
 	var req rendezvous.TouchRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || req.SessionID == "" {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -121,6 +131,9 @@ func (s *Server) handleTouch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePoll(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.rateLimit(w, r, s.limits.poll) {
 		return
 	}
 	sessionID := r.URL.Query().Get("sessionId")

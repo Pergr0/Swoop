@@ -12,8 +12,18 @@ func TestAllowOverlay(t *testing.T) {
 	if s.AllowOverlay("sess1", "host", "other-id") {
 		t.Fatal("wrong host peer should be rejected")
 	}
+	if s.AllowOverlay("sess1", "joiner", "joiner-id") {
+		t.Fatal("joiner must call Join before overlay attach")
+	}
+	_, ok := s.Join("sess1", "joiner-id", "10.0.0.2", "198.51.100.2", "Joiner", "sha256:abc", 55001, 53317, nil)
+	if !ok {
+		t.Fatal("join failed")
+	}
 	if !s.AllowOverlay("sess1", "joiner", "joiner-id") {
-		t.Fatal("joiner role should be allowed for active session")
+		t.Fatal("registered joiner should be allowed")
+	}
+	if s.AllowOverlay("sess1", "joiner", "other-joiner") {
+		t.Fatal("unregistered joiner peer should be rejected")
 	}
 	if s.AllowOverlay("sess1", "joiner", "host-id") {
 		t.Fatal("host peer cannot join as joiner")

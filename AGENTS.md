@@ -109,7 +109,9 @@ host won't see each other (shared identity + control port).
   pauses the timer so long sends are not cut off. When idle expires, both sides
   send `POST /api/v1/goodbye` and remove the tile. The signed invite blob still
   expires in 15 minutes if nobody joins; rendezvous room TTL is refreshed on
-  activity while paired.
+  activity while paired. The rendezvous server scopes rooms by `sessionId`;
+  overlay WebSocket attach requires the registered host or joiner `peerId`, and
+  per-IP rate limits guard register/join/poll/touch/overlay endpoints.
 - Network interface selection: a startup picker (`core/netif` enumerates up,
   non-loopback IPv4 interfaces with a name, addresses, a kind icon
   (wifi/ethernet/tunnel/virtual/other via `frontend/src/assets/net/`), and
