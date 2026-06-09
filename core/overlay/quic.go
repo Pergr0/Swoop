@@ -52,13 +52,13 @@ func yamuxOverQUIC(ctx context.Context, qconn quic.Connection, asServer bool) (*
 		if err != nil {
 			return nil, err
 		}
-		return yamux.Server(stream, newYamuxConfig())
+		return yamux.Server(stream, directYamuxConfig())
 	}
 	stream, err := qconn.OpenStreamSync(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return yamux.Client(stream, newYamuxConfig())
+	return yamux.Client(stream, directYamuxConfig())
 }
 
 func bindQUICUDP() (*net.UDPConn, int, error) {

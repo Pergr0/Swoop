@@ -106,3 +106,75 @@ func TestOverlayRelayProbe(t *testing.T) {
 	cancel()
 	wg.Wait()
 }
+
+// Regression: host relay must survive a long wait before the joiner arrives (yamux
+// keepalive on an unbridged WebSocket used to kill the session).
+func TestOverlayRelayDelayedJoiner(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow overlay relay delay test")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	srv := rvserver.New(addr)
+	go func() { _ = srv.ListenAndServe() }()
+	time.Sleep(150 * time.Millisecond)
+	overlay.SetRelayServer(func() string { return addr })
+
+	const sessionID = "sess-overlay-delay"
+	const hostPeer = "host-peer-id"
+	const joinerPeer = "joiner-peer-id"
+	const fp = "sha256:deadbeef"
+
+	reg, _ := json.Marshal(rendezvous.HostRegisterRequest{
+		SessionID: sessionID, PeerID: hostPeer, DeviceName: "Host",
+		LanAddr: "10.0.0.2", ControlPort: 0, PunchPort: 60001,
+	})
+	resp, err := http.Post("http://"+addr+"/api/v1/rendezvous/host", "application/json", bytes.NewReader(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	info := protocol.DeviceInfo{ID: hostPeer, Name: "Host", Fingerprint: fp}
+	controlSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(info)
+	}))
+	defer controlSrv.Close()
+	hostPort := controlSrv.Listener.Addr().(*net.TCPAddr).Port
+
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		link, err := overlay.ServeHost(ctx, overlay.HostParams{
+			SessionID: sessionID, PeerID: hostPeer, ControlPort: hostPort, DataPort: hostPort,
+		})
+		if err != nil {
+			t.Errorf("serve host: %v", err)
+			return
+		}
+		<-ctx.Done()
+		_ = link.Close()
+	}()
+
+	time.Sleep(20 * time.Second)
+	link, err := overlay.ConnectJoinerRetry(ctx, sessionID, joinerPeer)
+	if err != nil {
+		t.Fatalf("connect joiner after delay: %v", err)
+	}
+	defer link.Close()
+	if _, err := link.ProbeInfo(ctx, protocol.DeviceInfo{ID: hostPeer, Fingerprint: fp}); err != nil {
+		t.Fatalf("probe after delay: %v", err)
+	}
+	cancel()
+	wg.Wait()
+}

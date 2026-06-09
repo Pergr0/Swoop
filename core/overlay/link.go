@@ -115,7 +115,7 @@ func ConnectJoiner(ctx context.Context, sessionID, peerID string) (*Link, error)
 	if err != nil {
 		return nil, err
 	}
-	mux, err := yamux.Client(newWSConn(ws), newYamuxConfig())
+	mux, err := yamux.Client(newWSConn(ws), relayYamuxConfig())
 	if err != nil {
 		_ = ws.Close()
 		return nil, err
@@ -150,7 +150,7 @@ func ServeHost(ctx context.Context, p HostParams) (*Link, error) {
 	if err != nil {
 		return nil, err
 	}
-	mux, err := yamux.Server(newWSConn(ws), newYamuxConfig())
+	mux, err := yamux.Server(newWSConn(ws), relayYamuxConfig())
 	if err != nil {
 		_ = ws.Close()
 		return nil, err
@@ -529,7 +529,17 @@ func (l *Link) Close() error {
 	return err
 }
 
-func newYamuxConfig() *yamux.Config {
+// relayYamuxConfig is for invite-scoped WebSocket relay tunnels. Keepalive is off
+// because the host often waits minutes for a joiner while the rendezvous server
+// is not yet bridging bytes; yamux pings would fill the socket buffer and kill
+// the session before the importer arrives.
+func relayYamuxConfig() *yamux.Config {
+	cfg := yamux.DefaultConfig()
+	cfg.EnableKeepAlive = false
+	return cfg
+}
+
+func directYamuxConfig() *yamux.Config {
 	cfg := yamux.DefaultConfig()
 	cfg.EnableKeepAlive = true
 	cfg.KeepAliveInterval = 15 * time.Second

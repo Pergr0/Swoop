@@ -33,7 +33,10 @@ func (s *Server) handleOverlayConnect(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	s.Store.relay.attach(sessionID, role, ws)
+	// Block until the relay closes this socket. Returning from the handler
+	// would make net/http tear down the WebSocket immediately.
+	done := s.Store.relay.attach(sessionID, role, ws)
+	<-done
 }
 
 type relayBridge struct {
@@ -43,15 +46,18 @@ type relayBridge struct {
 }
 
 type relayRoom struct {
-	host   *websocket.Conn
-	joiner *websocket.Conn
+	host       *websocket.Conn
+	joiner     *websocket.Conn
+	hostDone   chan struct{}
+	joinerDone chan struct{}
 }
 
 func newRelayBridge(logf func(string, ...any)) *relayBridge {
 	return &relayBridge{rooms: make(map[string]*relayRoom), logf: logf}
 }
 
-func (b *relayBridge) attach(sessionID, role string, ws *websocket.Conn) {
+func (b *relayBridge) attach(sessionID, role string, ws *websocket.Conn) <-chan struct{} {
+	done := make(chan struct{})
 	b.mu.Lock()
 	room := b.rooms[sessionID]
 	if room == nil {
@@ -61,17 +67,21 @@ func (b *relayBridge) attach(sessionID, role string, ws *websocket.Conn) {
 	switch role {
 	case "host":
 		if room.host != nil {
+			b.signalDone(room.hostDone)
 			_ = room.host.Close()
 		}
 		room.host = ws
+		room.hostDone = done
 		if b.logf != nil {
 			b.logf("event=overlay_attach session=%s role=host", sessionID)
 		}
 	case "joiner":
 		if room.joiner != nil {
+			b.signalDone(room.joinerDone)
 			_ = room.joiner.Close()
 		}
 		room.joiner = ws
+		room.joinerDone = done
 		if b.logf != nil {
 			b.logf("event=overlay_attach session=%s role=joiner", sessionID)
 		}
@@ -85,6 +95,18 @@ func (b *relayBridge) attach(sessionID, role string, ws *websocket.Conn) {
 			b.logf("event=overlay_bridge session=%s", sessionID)
 		}
 		go b.bridge(sessionID, host, joiner)
+	}
+	return done
+}
+
+func (b *relayBridge) signalDone(ch chan struct{}) {
+	if ch == nil {
+		return
+	}
+	select {
+	case <-ch:
+	default:
+		close(ch)
 	}
 }
 
@@ -116,29 +138,6 @@ func copyWS(dst, src *websocket.Conn) error {
 	}
 }
 
-func (b *relayBridge) detach(sessionID, role string, ws *websocket.Conn) {
-	b.mu.Lock()
-	room, ok := b.rooms[sessionID]
-	if !ok {
-		b.mu.Unlock()
-		return
-	}
-	switch role {
-	case "host":
-		if room.host == ws {
-			room.host = nil
-		}
-	case "joiner":
-		if room.joiner == ws {
-			room.joiner = nil
-		}
-	}
-	if room.host == nil && room.joiner == nil {
-		delete(b.rooms, sessionID)
-	}
-	b.mu.Unlock()
-}
-
 func (b *relayBridge) cleanup(sessionID string) {
 	b.mu.Lock()
 	room := b.rooms[sessionID]
@@ -153,6 +152,8 @@ func (b *relayBridge) cleanup(sessionID string) {
 	if room.joiner != nil {
 		_ = room.joiner.Close()
 	}
+	b.signalDone(room.hostDone)
+	b.signalDone(room.joinerDone)
 }
 
 func (b *relayBridge) dropSession(sessionID string) {
