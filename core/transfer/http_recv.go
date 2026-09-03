@@ -67,7 +67,12 @@ func (m *Manager) HandleHTTPUpload(sessionID string, r *http.Request) int {
 		}
 
 		lim := sess.files[fileIndex].Size
-		n, err := copyLimited(sess.handles[fileIndex], part, lim, sess)
+		dest, err := sess.openDestHandle(fileIndex)
+		if err != nil {
+			m.failHTTPUpload(sess, err)
+			return http.StatusInternalServerError
+		}
+		n, err := copyLimited(dest, part, lim, sess)
 		_ = part.Close()
 		if err != nil {
 			m.failHTTPUpload(sess, err)

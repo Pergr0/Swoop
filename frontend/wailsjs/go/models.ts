@@ -32,6 +32,7 @@ export namespace invite {
 	    shortCode: string;
 	    expiresAt: number;
 	    deviceName: string;
+	    sessionId: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Bundle(source);
@@ -43,6 +44,7 @@ export namespace invite {
 	        this.shortCode = source["shortCode"];
 	        this.expiresAt = source["expiresAt"];
 	        this.deviceName = source["deviceName"];
+	        this.sessionId = source["sessionId"];
 	    }
 	}
 
@@ -134,6 +136,9 @@ export namespace protocol {
 	    browser?: string;
 	    paired?: boolean;
 	    pairStatus?: string;
+	    connectReach?: string;
+	    connectPath?: string;
+	    p2pNote?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeviceInfo(source);
@@ -154,6 +159,9 @@ export namespace protocol {
 	        this.browser = source["browser"];
 	        this.paired = source["paired"];
 	        this.pairStatus = source["pairStatus"];
+	        this.connectReach = source["connectReach"];
+	        this.connectPath = source["connectPath"];
+	        this.p2pNote = source["p2pNote"];
 	    }
 	}
 	export class SendItem {

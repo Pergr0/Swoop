@@ -16,6 +16,8 @@ var assets embed.FS
 var appIconPNG []byte
 
 func main() {
+	raiseFileLimit()
+
 	// Create an instance of the app structure
 	app := NewApp()
 

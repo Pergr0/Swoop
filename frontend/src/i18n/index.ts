@@ -31,6 +31,8 @@ export function localizeError(message: string): string {
     "не удалось отправить": "Could not send",
     "получатель отклонил сообщение": "Recipient rejected the message",
     "downloads folder is not available": "Downloads folder is not available",
+    "слишком много файлов": "too many files",
+    "нет файлов": "no files",
     "Ожидание подтверждения": "Waiting for confirmation",
     "Получатель отклонил передачу": "Recipient declined the transfer",
     "Получатель занят другой передачей": "Recipient is busy with another transfer",

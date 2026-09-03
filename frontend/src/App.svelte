@@ -35,6 +35,7 @@
   import GlobeIcon from "./components/GlobeIcon.svelte";
   import ImportIcon from "./components/ImportIcon.svelte";
   import { t, localizeError, discoveryLabelFor, folderCountLabel } from "./i18n";
+  import { APP_VERSION } from "./version";
 
   interface DeviceInfo {
     id: string; name: string; host: string; address: string;
@@ -739,7 +740,10 @@
         <SwoopLogo />
       </div>
       <div class="brand-text">
-        <h1>Swoop</h1>
+        <div class="brand-title-row">
+          <h1>Swoop</h1>
+          <span class="brand-version">v{APP_VERSION}</span>
+        </div>
         {#if started}
           <p class="brand-status">{discoveryLabel}</p>
         {/if}
@@ -1307,7 +1311,20 @@
     height: 100%;
   }
   .brand-text { min-width: 0; }
+  .brand-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+  }
   .brand h1 { font-size: var(--text-xl); margin: 0; font-weight: 700; line-height: 1.2; }
+  .brand-version {
+    flex-shrink: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-muted);
+    font-weight: 400;
+    line-height: 1.2;
+  }
   .brand-status {
     margin: 2px 0 0;
     font-size: var(--text-sm);

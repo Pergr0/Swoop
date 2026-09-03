@@ -125,7 +125,13 @@ func New(cfg Config) (*Engine, error) {
 	e.mgr = transfer.NewManager(e.Self, dl)
 	e.mgr.SetLogf(e.logf)
 	e.mgr.SetOverlayFor(func(peerID string) transfer.OverlayTunnel {
-		return e.overlayForPeer(peerID)
+		// Must return an untyped nil interface when absent. Returning a nil
+		// *overlay.Link boxed in OverlayTunnel makes `tun != nil` true and
+		// panics on DoControl/DialData (typed-nil interface trap).
+		if link := e.overlayForPeer(peerID); link != nil {
+			return link
+		}
+		return nil
 	})
 
 	e.chatLim = newRateLimiter(30, 10*time.Second)

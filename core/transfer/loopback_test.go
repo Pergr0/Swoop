@@ -77,13 +77,21 @@ func TestLoopbackTransfer(t *testing.T) {
 		case s := <-done:
 			switch s.State {
 			case "completed":
-				got, err := os.ReadFile(filepath.Join(dlDir, "hello.txt"))
+				// Sender may finish writing to TCP before the receiver's WriteAt
+				// lands; wait briefly for the file to appear with expected bytes.
+				var got []byte
+				var err error
+				for i := 0; i < 100; i++ {
+					got, err = os.ReadFile(filepath.Join(dlDir, "hello.txt"))
+					if err == nil && string(got) == string(want) {
+						return
+					}
+					time.Sleep(20 * time.Millisecond)
+				}
 				if err != nil {
 					t.Fatalf("read received: %v", err)
 				}
-				if string(got) != string(want) {
-					t.Fatalf("content mismatch: got %q", got)
-				}
+				t.Fatalf("content mismatch: got %q", got)
 				return
 			case "failed", "declined", "canceled":
 				t.Fatalf("transfer ended: state=%s msg=%s", s.State, s.Message)

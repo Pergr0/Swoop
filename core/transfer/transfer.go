@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -259,6 +260,7 @@ type recvSession struct {
 	token     string
 	mode      string // protocol.TransferTCPPush or TransferHTTPUpload
 	decision  chan bool
+	handlesMu sync.Mutex
 	handles   []*os.File
 	destPaths []string
 
@@ -313,8 +315,15 @@ func (m *Manager) PrepareUpload(req protocol.PrepareUploadRequest, remoteAddr st
 
 	summary := staging.SummarizeOffer(fileMetasLite(req.Files))
 	m.logf("incoming offer from %s: %d file(s), %d bytes; awaiting user decision", req.Sender.Name, len(req.Files), total)
+	// Only a short preview goes to the UI event — shipping tens of thousands of
+	// FileMeta structs through Wails/WebKit has crashed the desktop app.
+	const offerPreview = 8
+	preview := req.Files
+	if len(preview) > offerPreview {
+		preview = preview[:offerPreview]
+	}
 	m.emitOffer(Offer{
-		Sender: req.Sender, Files: req.Files, TotalSize: total, Count: len(req.Files),
+		Sender: req.Sender, Files: preview, TotalSize: total, Count: len(req.Files),
 		RootDirs: summary.RootDirs, LooseFiles: summary.LooseFiles,
 	})
 	m.emitState(State{Direction: DirRecv, State: "waiting", Message: "Запрос на приём файлов", Peer: req.Sender.Name})
@@ -410,7 +419,9 @@ func (m *Manager) prepareDestFiles(sess *recvSession) error {
 	if err := os.MkdirAll(m.downloadsDir, 0o755); err != nil {
 		return err
 	}
-	for _, f := range sess.files {
+	sess.handles = make([]*os.File, len(sess.files))
+	sess.destPaths = make([]string, len(sess.files))
+	for i, f := range sess.files {
 		rel := f.RelPath
 		if rel == "" {
 			rel = f.Name
@@ -419,17 +430,40 @@ func (m *Manager) prepareDestFiles(sess *recvSession) error {
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return err
 		}
+		// Create the file now (pre-allocate size) but close it — open lazily
+		// during receive so we do not hold thousands of FDs for big folders.
 		fh, err := os.Create(dest)
 		if err != nil {
 			return err
 		}
 		if f.Size > 0 {
-			_ = fh.Truncate(f.Size)
+			if err := fh.Truncate(f.Size); err != nil {
+				_ = fh.Close()
+				return err
+			}
 		}
-		sess.handles = append(sess.handles, fh)
-		sess.destPaths = append(sess.destPaths, dest)
+		_ = fh.Close()
+		sess.destPaths[i] = dest
 	}
 	return nil
+}
+
+// openDestHandle opens the destination file for fileIndex (created in prepareDestFiles).
+func (s *recvSession) openDestHandle(fileIndex int) (*os.File, error) {
+	s.handlesMu.Lock()
+	defer s.handlesMu.Unlock()
+	if fileIndex < 0 || fileIndex >= len(s.files) {
+		return nil, errors.New("bad file index")
+	}
+	if s.handles[fileIndex] != nil {
+		return s.handles[fileIndex], nil
+	}
+	fh, err := os.OpenFile(s.destPaths[fileIndex], os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	s.handles[fileIndex] = fh
+	return fh, nil
 }
 
 func (m *Manager) handleDataConn(conn net.Conn) {
@@ -468,7 +502,7 @@ func (m *Manager) handleDataConn(conn net.Conn) {
 		fi := binary.BigEndian.Uint32(hdr[0:4])
 		off := int64(binary.BigEndian.Uint64(hdr[4:12]))
 		ln := int64(binary.BigEndian.Uint64(hdr[12:20]))
-		if int(fi) >= len(sess.handles) || int(fi) >= len(sess.files) {
+		if int(fi) >= len(sess.files) {
 			sess.setErr(errors.New("bad file index"))
 			sess.finalizeRecv(m, false)
 			return
@@ -476,6 +510,12 @@ func (m *Manager) handleDataConn(conn net.Conn) {
 		fileSize := sess.files[fi].Size
 		if ln < 0 || off < 0 || off+ln > fileSize {
 			sess.setErr(errors.New("invalid chunk range"))
+			sess.finalizeRecv(m, false)
+			return
+		}
+		dest, err := sess.openDestHandle(int(fi))
+		if err != nil {
+			sess.setErr(err)
 			sess.finalizeRecv(m, false)
 			return
 		}
@@ -488,7 +528,7 @@ func (m *Manager) handleDataConn(conn net.Conn) {
 			}
 			n, err := io.ReadFull(conn, buf[:toRead])
 			if n > 0 {
-				if _, werr := sess.handles[fi].WriteAt(buf[:n], pos); werr != nil {
+				if _, werr := dest.WriteAt(buf[:n], pos); werr != nil {
 					sess.setErr(werr)
 					sess.finalizeRecv(m, false)
 					return
@@ -513,7 +553,9 @@ func (s *recvSession) finalizeRecv(m *Manager, success bool) {
 		close(s.done)
 		canceled := s.canceled()
 		for _, h := range s.handles {
-			_ = h.Close()
+			if h != nil {
+				_ = h.Close()
+			}
 		}
 		if canceled {
 			for _, p := range s.destPaths {
@@ -705,6 +747,12 @@ func (m *Manager) clearOutgoing(sess *sendSession) {
 
 func (m *Manager) runSend(sess *sendSession) {
 	defer m.clearOutgoing(sess)
+	defer func() {
+		if rec := recover(); rec != nil {
+			m.logf("panic in send to %s: %v\n%s", sess.peer.Name, rec, debug.Stack())
+			m.emitState(State{Direction: DirSend, State: "failed", Message: "внутренняя ошибка отправки", Peer: sess.peer.Name})
+		}
+	}()
 	peer := sess.peer
 
 	if peer.Platform == protocol.PlatformWeb {
@@ -752,13 +800,6 @@ func (m *Manager) runSend(sess *sendSession) {
 		return
 	}
 
-	srcs, err := openAll(sess.srcPaths)
-	if err != nil {
-		m.emitState(State{Direction: DirSend, State: "failed", Message: err.Error(), Peer: peer.Name})
-		return
-	}
-	defer closeAll(srcs)
-
 	chunks := buildChunks(sess.files, m.chunkSize)
 	if len(chunks) == 0 { // all files empty
 		m.emitProgress(Progress{Direction: DirSend, Bytes: sess.total, Total: sess.total, Streams: m.streams, Peer: peer.Name})
@@ -770,7 +811,7 @@ func (m *Manager) runSend(sess *sendSession) {
 	m.emitState(State{Direction: DirSend, State: "transferring", Peer: peer.Name})
 	go m.reportLoop(DirSend, peer.Name, sess.files, sess.total, &sess.sent, sess.start, sess.stop)
 
-	m.runSendWorkers(sess, resp, srcs, sess.files, chunks)
+	m.runSendWorkers(sess, resp, chunks)
 	close(sess.stop)
 
 	switch {
@@ -792,11 +833,12 @@ func (m *Manager) runSend(sess *sendSession) {
 // reserved for large-file chunks so tiny files cannot monopolize every TCP
 // connection; the remaining streams prefer small chunks and help with large
 // work once the small queue is drained.
-func (m *Manager) runSendWorkers(sess *sendSession, resp protocol.PrepareUploadResponse, srcs []*os.File, files []protocol.FileMeta, chunks []chunk) {
+func (m *Manager) runSendWorkers(sess *sendSession, resp protocol.PrepareUploadResponse, chunks []chunk) {
 	streams := m.streams
 	if streams < 1 {
 		streams = 1
 	}
+	files := sess.files
 	large, small := partitionChunks(files, chunks, m.chunkSize)
 
 	var wg sync.WaitGroup
@@ -810,7 +852,7 @@ func (m *Manager) runSendWorkers(sess *sendSession, resp protocol.PrepareUploadR
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				m.sendWorker(sess, resp, srcs, ch)
+				m.sendWorker(sess, resp, ch)
 			}()
 		}
 		wg.Wait()
@@ -837,12 +879,12 @@ func (m *Manager) runSendWorkers(sess *sendSession, resp protocol.PrepareUploadR
 		if i < reserved {
 			go func() {
 				defer wg.Done()
-				m.sendWorker(sess, resp, srcs, largeCh)
+				m.sendWorker(sess, resp, largeCh)
 			}()
 		} else {
 			go func() {
 				defer wg.Done()
-				m.sendWorkerPreferSmall(sess, resp, srcs, largeCh, smallCh)
+				m.sendWorkerPreferSmall(sess, resp, largeCh, smallCh)
 			}()
 		}
 	}
@@ -877,18 +919,43 @@ func (m *Manager) openSendConn(sess *sendSession, resp protocol.PrepareUploadRes
 	return conn, nil
 }
 
-func (m *Manager) sendWorker(sess *sendSession, resp protocol.PrepareUploadResponse, srcs []*os.File, chunkCh <-chan chunk) {
+func (m *Manager) sendWorker(sess *sendSession, resp protocol.PrepareUploadResponse, chunkCh <-chan chunk) {
 	conn, err := m.openSendConn(sess, resp)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
+	var curIdx = -1
+	var curFile *os.File
+	defer func() {
+		if curFile != nil {
+			_ = curFile.Close()
+		}
+	}()
+
 	for c := range chunkCh {
 		if sess.canceled() {
 			return
 		}
-		if err := sendChunk(conn, c, srcs, &sess.sent); err != nil {
+		if c.fileIndex != curIdx {
+			if curFile != nil {
+				_ = curFile.Close()
+				curFile = nil
+			}
+			if c.fileIndex < 0 || c.fileIndex >= len(sess.srcPaths) {
+				sess.setErr(errors.New("bad file index"))
+				return
+			}
+			f, err := os.Open(sess.srcPaths[c.fileIndex])
+			if err != nil {
+				sess.setErr(err)
+				return
+			}
+			curFile = f
+			curIdx = c.fileIndex
+		}
+		if err := writeChunk(conn, c, curFile, &sess.sent); err != nil {
 			if !sess.canceled() {
 				sess.setErr(err)
 			}
@@ -897,19 +964,43 @@ func (m *Manager) sendWorker(sess *sendSession, resp protocol.PrepareUploadRespo
 	}
 }
 
-func (m *Manager) sendWorkerPreferSmall(sess *sendSession, resp protocol.PrepareUploadResponse, srcs []*os.File, largeCh, smallCh <-chan chunk) {
+func (m *Manager) sendWorkerPreferSmall(sess *sendSession, resp protocol.PrepareUploadResponse, largeCh, smallCh <-chan chunk) {
 	conn, err := m.openSendConn(sess, resp)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 
+	var curIdx = -1
+	var curFile *os.File
+	defer func() {
+		if curFile != nil {
+			_ = curFile.Close()
+		}
+	}()
+	sendOne := func(c chunk) error {
+		if c.fileIndex != curIdx {
+			if curFile != nil {
+				_ = curFile.Close()
+				curFile = nil
+			}
+			if c.fileIndex < 0 || c.fileIndex >= len(sess.srcPaths) {
+				return errors.New("bad file index")
+			}
+			f, err := os.Open(sess.srcPaths[c.fileIndex])
+			if err != nil {
+				return err
+			}
+			curFile = f
+			curIdx = c.fileIndex
+		}
+		return writeChunk(conn, c, curFile, &sess.sent)
+	}
+
 	for largeCh != nil || smallCh != nil {
 		if sess.canceled() {
 			return
 		}
-		// Prefer small chunks when both queues have work so metadata-heavy
-		// tiny files drain without blocking this worker on large ranges.
 		if smallCh != nil {
 			select {
 			case c, ok := <-smallCh:
@@ -917,7 +1008,7 @@ func (m *Manager) sendWorkerPreferSmall(sess *sendSession, resp protocol.Prepare
 					smallCh = nil
 					continue
 				}
-				if err := sendChunk(conn, c, srcs, &sess.sent); err != nil {
+				if err := sendOne(c); err != nil {
 					if !sess.canceled() {
 						sess.setErr(err)
 					}
@@ -933,7 +1024,7 @@ func (m *Manager) sendWorkerPreferSmall(sess *sendSession, resp protocol.Prepare
 				smallCh = nil
 				continue
 			}
-			if err := sendChunk(conn, c, srcs, &sess.sent); err != nil {
+			if err := sendOne(c); err != nil {
 				if !sess.canceled() {
 					sess.setErr(err)
 				}
@@ -944,7 +1035,7 @@ func (m *Manager) sendWorkerPreferSmall(sess *sendSession, resp protocol.Prepare
 				largeCh = nil
 				continue
 			}
-			if err := sendChunk(conn, c, srcs, &sess.sent); err != nil {
+			if err := sendOne(c); err != nil {
 				if !sess.canceled() {
 					sess.setErr(err)
 				}
@@ -954,7 +1045,7 @@ func (m *Manager) sendWorkerPreferSmall(sess *sendSession, resp protocol.Prepare
 	}
 }
 
-func sendChunk(conn net.Conn, c chunk, srcs []*os.File, counter *int64) error {
+func writeChunk(conn net.Conn, c chunk, src *os.File, counter *int64) error {
 	var hdr [frameHeader]byte
 	binary.BigEndian.PutUint32(hdr[0:4], uint32(c.fileIndex))
 	binary.BigEndian.PutUint64(hdr[4:12], uint64(c.offset))
@@ -962,7 +1053,7 @@ func sendChunk(conn net.Conn, c chunk, srcs []*os.File, counter *int64) error {
 	if _, err := conn.Write(hdr[:]); err != nil {
 		return err
 	}
-	sr := io.NewSectionReader(srcs[c.fileIndex], c.offset, c.length)
+	sr := io.NewSectionReader(src, c.offset, c.length)
 	_, err := io.Copy(&countingWriter{w: conn, counter: counter}, sr)
 	return err
 }
@@ -1166,29 +1257,10 @@ func resolveSendFiles(items []protocol.SendItem) ([]protocol.FileMeta, []string,
 		srcPaths = append(srcPaths, it.Path)
 		total += fi.Size()
 	}
-	if len(files) == 0 {
-		return nil, nil, 0, errors.New("нет файлов для отправки")
+	if err := ValidateOfferFiles(files); err != nil {
+		return nil, nil, 0, err
 	}
 	return files, srcPaths, total, nil
-}
-
-func openAll(paths []string) ([]*os.File, error) {
-	out := make([]*os.File, 0, len(paths))
-	for _, p := range paths {
-		f, err := os.Open(p)
-		if err != nil {
-			closeAll(out)
-			return nil, err
-		}
-		out = append(out, f)
-	}
-	return out, nil
-}
-
-func closeAll(files []*os.File) {
-	for _, f := range files {
-		_ = f.Close()
-	}
 }
 
 func sanitizeName(name string) string {

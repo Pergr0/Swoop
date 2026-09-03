@@ -9,5 +9,11 @@
   "author": {
     "name": "pergr0",
     "email": "beer-hunter@yandex.com"
+  },
+  "info": {
+    "companyName": "Swoop",
+    "productName": "Swoop",
+    "productVersion": "1.1.1",
+    "copyright": "Copyright Swoop"
   }
 }

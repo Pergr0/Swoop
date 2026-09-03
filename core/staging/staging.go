@@ -4,11 +4,14 @@ package staging
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"swoop/core/protocol"
 )
 
 // Kind marks a staging tree node.
@@ -57,9 +60,11 @@ type dirBuilder struct {
 }
 
 // Scan builds staging trees for the given absolute paths (files or directories).
+// Returns an error if the total file count would exceed the transfer limit.
 func Scan(paths []string) ([]Entry, error) {
 	seen := make(map[string]struct{})
 	var roots []Entry
+	var totalFiles int
 	for _, p := range paths {
 		p = filepath.Clean(p)
 		if p == "" {
@@ -72,6 +77,10 @@ func Scan(paths []string) ([]Entry, error) {
 		e, err := scanOne(p)
 		if err != nil {
 			return nil, err
+		}
+		totalFiles += e.FileCount
+		if totalFiles > protocol.MaxTransferFiles {
+			return nil, fmt.Errorf("слишком много файлов (макс %d)", protocol.MaxTransferFiles)
 		}
 		roots = append(roots, e)
 	}

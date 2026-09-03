@@ -1,0 +1,48 @@
+schema: spec-driven
+
+context: |
+  Swoop is a zero-config LAN/internet file-transfer app (protocol-first).
+  Stack: Go 1.23 core (no CGO, no Wails imports in core/), Wails v2 desktop shell,
+  Svelte+Vite+TypeScript frontend. Control plane = HTTPS; data plane = parallel TCP
+  (desktop↔desktop) or HTTP multipart/pull (browser).
+  Product version: 1.1.1 (frontend/src/version.ts, wails.json). Always bump per
+  openspec/VERSIONING.md (MAJOR breaking / MINOR feature / PATCH fix|rules).
+  Spec catalog: openspec/catalog.md (S001–S024). Live dashboard: openspec/STATUS.md.
+  Implementation map: root AGENTS.md. OpenSpec workflow: openspec/AGENTS.md.
+  RULE: all behavior work goes through openspec/changes (propose → tasks plan →
+  apply → archive → version bump). Keep STATUS.md, catalog, and each spec Status
+  line current.
+  Keep core/ free of UI/Wails/CGO; verify with `make cross-core` and `go vet ./core/...`.
+  Shell/Makefile: LF endings, ASCII-only output.
+
+rules:
+  proposal:
+    - Reference capability ids from openspec/catalog.md (e.g. S007 transfer)
+    - Include a Status line: Proposed | In progress | Done | Blocked | Cancelled
+    - Mark BREAKING when wire protocol or persisted identity format changes
+    - Include Non-goals when scope is easy to overgrow
+    - Update openspec/STATUS.md Active changes when creating the proposal
+  specs:
+    - Every requirement MUST use SHALL/MUST and at least one #### Scenario with WHEN/THEN
+    - Prefer observable behavior over package/function names
+    - Capability specs MUST have Status: Implemented | Planned | In progress | Deprecated
+  tasks:
+    - tasks.md is the mandatory implementation plan before coding
+    - Each task must state how to verify completion
+    - Prefer `go vet ./core/...` and targeted package tests over full UI builds when possible
+  design:
+    - Required for cross-cutting, security, or protocol changes
+
+operations:
+  apply:
+    guidance:
+      - Set change Status to In progress; tick tasks only when verified
+      - Update root AGENTS.md and openspec/STATUS.md + catalog when behavior ships
+      - Bump product version per openspec/VERSIONING.md and sync all version files
+      - Do not leave build artifacts (build/bin, frontend/dist except .gitkeep, node_modules)
+  archive:
+    guidance:
+      - Merge deltas into openspec/specs/<capability>/spec.md
+      - Set capability Status; refresh STATUS.md summary tables and Product version
+      - Confirm version bump recorded in proposal/STATUS
+      - Move change under changes/archive/YYYY-MM-DD-<id>/

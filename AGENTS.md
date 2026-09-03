@@ -3,6 +3,20 @@
 Persistent project context for AI agents working in this repository. Read this
 first. Keep it accurate (see "Maintenance rule" at the end).
 
+**Spec-driven workflow (OpenSpec) — mandatory:**
+
+- Numbered capabilities: `openspec/catalog.md` (S001–S024)
+- Living dashboard: `openspec/STATUS.md` (always keep current)
+- Behavior contracts: `openspec/specs/<capability>/spec.md` (each has **Status**)
+- Agent OpenSpec rules: `openspec/AGENTS.md`, Cursor rule `.cursor/rules/swoop-openspec.mdc`
+- Every behavior change: `/opsx-propose` (proposal + plan) → `/opsx-apply` →
+  version bump (`openspec/VERSIONING.md`) → `/opsx-archive`. Do not implement
+  features without an OpenSpec change and `tasks.md` plan. Always bump
+  MAJOR/MINOR/PATCH per VERSIONING.md and sync version files. Update
+  STATUS/catalog/AGENTS in the same change.
+
+This file remains the implementation map (packages, ports, UI details).
+
 ## 1. What Swoop is
 
 Swoop is a zero-config file-transfer app for the local network. Devices running
@@ -50,6 +64,7 @@ main.go              Wails entry point
 frontend/            Svelte + TypeScript UI (device grid, live updates)
 scripts/             build.ps1 (Windows), build.sh (Linux/macOS)
 Makefile             thin wrappers over scripts/build.sh
+openspec/            OpenSpec catalog + capability specs (S001–S024)
 ```
 
 ## 4. Tech stack and toolchain
@@ -95,6 +110,8 @@ Note: testing discovery needs TWO machines on the same LAN; two instances on one
 host won't see each other (shared identity + control port).
 
 ## 6. Implemented features (current state)
+
+Behavior contracts: `openspec/specs/` (catalog S001–S017). Summary map:
 
 - Stable device identity: ECDSA key + self-signed TLS cert, sha256 fingerprint,
   persisted under the OS config dir (`%AppData%/Swoop`, `~/.config/Swoop`).
@@ -191,6 +208,9 @@ host won't see each other (shared identity + control port).
   `useDropTarget=false` on Windows/WebView2) to register drag listeners; the Go
   `OnFileDrop` hook in `app.go` then receives paths and emits `files:dropped`.
   The drop zone uses `--wails-drop-target: drop` for highlight feedback.
+  Folder sends open source/dest files lazily (not all at once) and raise the
+  process file-descriptor soft limit on startup so macOS GUI launches (~256 FDs)
+  do not crash WebKit mid-transfer.
 - Chat (per-peer text/links): a `POST /api/v1/message` control-plane endpoint
   (same TLS + fingerprint pinning as the rest). Messages are received without a
   prompt but are validated (UTF-8, <=8 KiB), per-peer rate-limited, and stored
@@ -246,15 +266,17 @@ host won't see each other (shared identity + control port).
 
 ## 7. Not yet implemented (roadmap)
 
-- Data-plane hardening: per-file sha256 integrity, resumable transfers, and AEAD
-  encryption of the data channel (currently token-authenticated plaintext on LAN).
-- Trust/pairing UI (explicit TOFU confirmation, PIN/QR); the control channel
-  already pins the peer fingerprint.
-- mDNS/DNS-SD layered on top of the multicast fallback.
-- QR / manual-IP fallback for networks with client isolation.
-- Windows firewall prompt/rule on first run.
-- Mobile browser polish: resumable `Range` pull, WebSocket progress on the phone.
-- Native mobile apps (iOS/Android app store builds).
+Planned OpenSpec capabilities (see `openspec/catalog.md`):
+
+- **S018** Data-plane hardening: per-file sha256, resumable transfers, AEAD
+  (currently token-authenticated plaintext on LAN).
+- **S019** Trust/pairing UI (explicit TOFU PIN/QR); control channel already pins
+  fingerprints.
+- **S020** mDNS/DNS-SD layered on multicast fallback.
+- **S021** QR / manual-IP fallback for client-isolation networks.
+- **S022** Windows firewall prompt/rule on first run.
+- **S023** Mobile browser polish: resumable `Range` pull, WebSocket progress.
+- **S024** Native mobile apps (iOS/Android).
 
 ## 8. Conventions
 
@@ -270,8 +292,15 @@ host won't see each other (shared identity + control port).
 
 ## 9. Maintenance rule (IMPORTANT)
 
-This file is the source of truth for project context. Whenever you make a change
-that affects any of the following, update AGENTS.md in the SAME change:
+This file is the implementation-map source of truth. Behavior contracts and
+progress live under `openspec/`. Whenever you make a change that affects any of
+the following, update **in the SAME change**:
+
+1. OpenSpec change artifacts (or archive merge into `openspec/specs/`)
+2. `openspec/STATUS.md` (dashboard) and `openspec/catalog.md` if status/ids move
+3. This `AGENTS.md` when architecture, stack, §6/§7, or conventions change
+
+Triggers:
 
 - a new feature or component is added, or an existing one is removed/renamed;
 - requirements, goals, or principles change;
@@ -280,6 +309,7 @@ that affects any of the following, update AGENTS.md in the SAME change:
 - an item moves between "Implemented features" (section 6) and "Roadmap"
   (section 7).
 
-Concretely: when you finish a feature, move it from section 7 to section 6 and
-adjust sections 3-5 if the structure changed. Keep entries short and accurate.
-Do not let this file drift from the actual code.
+Concretely: finish features via OpenSpec archive, flip Status on the capability
+spec, refresh STATUS.md tables, move the bullet §7→§6, adjust §3–5 if structure
+changed. Keep entries short. Do not let AGENTS, STATUS, or the catalog drift
+from the code.
